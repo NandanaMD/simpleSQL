@@ -1,0 +1,15 @@
+{
+  "name": "@sql-ide/shared",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types for SQL IDE",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "npx tsc",
+    "typecheck": "npx tsc --noEmit",
+    "watch": "npx tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

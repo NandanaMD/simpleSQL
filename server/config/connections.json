@@ -1,0 +1,15 @@
+{
+  "connections": {
+    "b9d08c0b-acac-46a8-8260-bf8cc790f115": {
+      "id": "b9d08c0b-acac-46a8-8260-bf8cc790f115",
+      "name": "Nandan",
+      "host": "localhost",
+      "port": 5432,
+      "username": "postgres",
+      "password": "nandan123",
+      "defaultDatabase": "postgres",
+      "createdAt": "2026-02-24T21:32:31.381Z",
+      "updatedAt": "2026-02-24T21:32:31.381Z"
+    }
+  }
+}
