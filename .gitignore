@@ -7,9 +7,19 @@ pnpm-debug.log*
 
 # Build outputs
 dist/
+dist-electron/
 build/
 release/
 out/
+*.exe
+*.exe.blockmap
+*.dmg
+*.AppImage
+*.snap
+*.deb
+*.rpm
+*.zip
+*.tar.gz
 
 # Environment
 .env
@@ -32,9 +42,29 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# Config (may contain sensitive connection strings)
+config/connections.json
+config/connections.db
+connections.json
+connections.db
+
+# Runtime data
+data/
+server/data/
+electron/data/
+
+# Backups
+backups/
+server/server/backups/
+*.backup
+*.bak
+
 # Logs
 logs/
 *.log
+electron.log
+server/logs/
+electron/logs/
 
 # Temp
 tmp/
@@ -48,3 +78,10 @@ coverage/
 # Electron
 app/
 electron-builder.yml
+dist-installer/
+builder-*.yml
+builder-*.yaml
+win-unpacked/
+mac/
+linux-unpacked/
+latest.yml
