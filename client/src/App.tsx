@@ -13,8 +13,13 @@ import { HelpPanel } from './components/HelpPanel';
 import { SavedQueriesDialog } from './components/SavedQueriesDialog';
 import { IntroducingSimpleSyntaxDialog } from './components/IntroducingSimpleSyntaxDialog';
 import { Toaster } from 'sonner';
-import { Plus, FileUp, Sun, Moon, Settings, HelpCircle, BookOpen, Sparkles } from 'lucide-react';
+import { Sun, Moon, Sparkles } from 'lucide-react';
 import { Button } from './components/ui/button';
+import savedQueriesIcon from '../../assets/icons/saved_queries.svg';
+import helpIcon from '../../assets/icons/help.svg';
+import settingsIcon from '../../assets/icons/settings.svg';
+import importIcon from '../../assets/icons/import.svg';
+import connectionIcon from '../../assets/icons/connection.svg';
 
 function App() {
   const [showConnectionManager, setShowConnectionManager] = useState(false);
@@ -92,31 +97,31 @@ function App() {
           <Button 
             size="sm" 
             variant="default"
-            className="bg-[#0078d4] hover:bg-[#106ebe] text-white"
+            className="h-8 px-3 text-xs bg-[#0078d4] hover:bg-[#106ebe] text-white"
             onClick={() => setShowIntroSimpleSyntax(true)} 
-            title="Introducing SimpleSyntax"
+            title="Try SimpleSyntax"
           >
-            <Sparkles className="h-4 w-4 mr-2" />
-            Introducing SimpleSyntax
+            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+            Try SimpleSyntax
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowSavedQueries(true)} title="Saved Queries">
-            <BookOpen className="h-4 w-4" />
+            <img src={savedQueriesIcon} alt="" aria-hidden="true" className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} title="Help">
-            <HelpCircle className="h-4 w-4" />
+            <img src={helpIcon} alt="" aria-hidden="true" className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="ghost" onClick={toggleTheme} title="Toggle Theme">
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowSettings(true)} title="Settings">
-            <Settings className="h-4 w-4" />
+            <img src={settingsIcon} alt="" aria-hidden="true" className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={() => openWizard()}>
-            <FileUp className="h-4 w-4 mr-2" />
+            <img src={importIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
             Import
           </Button>
           <Button size="sm" onClick={() => setShowConnectionManager(true)}>
-            <Plus className="h-4 w-4 mr-2" />
+            <img src={connectionIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
             Connection
           </Button>
         </div>
@@ -173,7 +178,7 @@ function App() {
       />
 
       {/* Toast Notifications */}
-      <Toaster position="bottom-right" />
+      <Toaster position="top-right" />
     </div>
   );
 }

@@ -233,6 +233,10 @@ export interface EditorTab {
   resultRowCount?: number;
   executionTime?: number;
   executionTimestamp?: Date;
+  lastExecutedSql?: string;
+  lastExecutionMode?: 'sql' | 'simple';
+  lastExecutionConnectionId?: string;
+  lastExecutionDatabase?: string;
   errorInfo?: string | null;
   decorations?: string[]; // Monaco decoration IDs
 }

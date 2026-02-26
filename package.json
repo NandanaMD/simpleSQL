@@ -12,11 +12,13 @@
     "shared"
   ],
   "scripts": {
-    "_postinstall": "electron-builder install-app-deps",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev",
-    "dev:electron": "cd electron && npm run dev",
-    "dev": "concurrently -n \"server,client,electron\" -c \"blue,magenta,cyan\" \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:electron\"",
+    "preinstall": "node scripts/enforce-node20.js",
+    "postinstall": "set \"PATH=%CD%\\.tools\\node20\\node-v20.20.0-win-x64;%PATH%\" && node scripts/fix-native-modules.js",
+    "rebuild": "set \"PATH=%CD%\\.tools\\node20\\node-v20.20.0-win-x64;%PATH%\" && node scripts/fix-native-modules.js",
+    "dev:server": "node -e \"console.error('Blocked: standalone server dev runtime is disabled. Use npm run dev (Electron entrypoint only).'); process.exit(1);\"",
+    "dev:client": "set \"PATH=%CD%\\.tools\\node20\\node-v20.20.0-win-x64;%PATH%\" && cd client && npm run dev",
+    "dev:electron": "set \"PATH=%CD%\\.tools\\node20\\node-v20.20.0-win-x64;%PATH%\" && cd electron && npm run dev",
+    "dev": "concurrently -n \"client,electron\" -c \"magenta,cyan\" \"npm run dev:client\" \"npm run dev:electron\"",
     "build:shared": "cd shared && npm run build",
     "build:server": "cd server && npm run build",
     "build:client": "cd client && npm run build",

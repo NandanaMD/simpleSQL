@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import type { CSVPreview, ColumnMapping, CSVImportResult } from '@sql-ide/shared';
 
+export interface BatchImportFileResult {
+  fileName: string;
+  tableName: string;
+  success: boolean;
+  rowsInserted: number;
+  duration: number;
+  errors: Array<{ row: number; message: string }>;
+  message: string;
+}
+
 export interface ImportState {
   // Wizard state
   currentStep: number;
@@ -14,6 +24,7 @@ export interface ImportState {
   
   // Step 1: File
   file: File | null;
+  files: File[];
   preview: CSVPreview | null;
   delimiter: string;
   hasHeader: boolean;
@@ -39,6 +50,7 @@ export interface ImportState {
   isImporting: boolean;
   importProgress: number;
   importResult: CSVImportResult | null;
+  batchImportResults: BatchImportFileResult[];
   
   // Actions
   openWizard: (context?: {
@@ -55,6 +67,8 @@ export interface ImportState {
   
   // Step 1 actions
   setFile: (file: File | null) => void;
+  setFiles: (files: File[]) => void;
+  removeFileAt: (index: number) => void;
   setPreview: (preview: CSVPreview | null) => void;
   setDelimiter: (delimiter: string) => void;
   setHasHeader: (hasHeader: boolean) => void;
@@ -81,12 +95,14 @@ export interface ImportState {
   setIsImporting: (importing: boolean) => void;
   setImportProgress: (progress: number) => void;
   setImportResult: (result: CSVImportResult | null) => void;
+  setBatchImportResults: (results: BatchImportFileResult[]) => void;
 }
 
 const initialState = {
   currentStep: 0,
   isOpen: false,
   file: null,
+  files: [],
   preview: null,
   delimiter: ',',
   hasHeader: true,
@@ -104,6 +120,7 @@ const initialState = {
   isImporting: false,
   importProgress: 0,
   importResult: null,
+  batchImportResults: [],
 };
 
 export const useImportStore = create<ImportState>((set) => ({
@@ -133,7 +150,25 @@ export const useImportStore = create<ImportState>((set) => ({
   
   previousStep: () => set((state) => ({ currentStep: Math.max(state.currentStep - 1, 0) })),
   
-  setFile: (file) => set({ file }),
+  setFile: (file) => set({ file, files: file ? [file] : [] }),
+  setFiles: (files) => set({
+    files,
+    file: files[0] || null,
+  }),
+  removeFileAt: (index) => set((state) => {
+    const nextFiles = state.files.filter((_, i) => i !== index);
+    const currentFileStillExists = state.file
+      ? nextFiles.some((f) => f.name === state.file?.name && f.size === state.file?.size && f.lastModified === state.file?.lastModified)
+      : false;
+
+    return {
+      files: nextFiles,
+      file: currentFileStillExists ? state.file : (nextFiles[0] || null),
+      preview: nextFiles.length ? state.preview : null,
+      columnMappings: nextFiles.length ? state.columnMappings : [],
+      tableName: nextFiles.length ? state.tableName : '',
+    };
+  }),
   setPreview: (preview) => set({ preview }),
   setDelimiter: (delimiter) => set({ delimiter }),
   setHasHeader: (hasHeader) => set({ hasHeader }),
@@ -158,4 +193,5 @@ export const useImportStore = create<ImportState>((set) => ({
   setIsImporting: (importing) => set({ isImporting: importing }),
   setImportProgress: (progress) => set({ importProgress: progress }),
   setImportResult: (result) => set({ importResult: result }),
+  setBatchImportResults: (results) => set({ batchImportResults: results }),
 }));

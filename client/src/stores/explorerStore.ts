@@ -2,11 +2,18 @@ import { create } from 'zustand';
 
 interface TreeNode {
   id: string;
-  type: 'connection' | 'database' | 'table' | 'view';
+  type: 'connection' | 'database' | 'table' | 'view' | 'column';
   label: string;
   connectionId: string;
   database?: string;
   table?: string;
+  column?: string;
+  columnMeta?: {
+    dataType: string;
+    isPrimaryKey: boolean;
+    isNullable: boolean;
+    isUnique: boolean;
+  };
   isExpanded: boolean;
   isLoading: boolean;
   children?: TreeNode[];

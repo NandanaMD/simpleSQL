@@ -4,11 +4,12 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useThemeStore } from '../stores/themeStore';
 import Editor, { OnMount } from '@monaco-editor/react';
-import { Play, X, Plus, Code2, AlertTriangle, HelpCircle } from 'lucide-react';
+import { X, Plus, Code2, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import * as api from '../lib/api';
 import { toast } from 'sonner';
 import type { QueryRequest } from '@sql-ide/shared';
+import executeIcon from '../../../assets/icons/execute.svg';
 
 import { formatSQL, validateSQL } from '../lib/sqlFormatter';
 import { interpretError, clearHighlights } from '../lib/errorInterpreter';
@@ -197,6 +198,10 @@ export function SQLEditor() {
       return;
     }
 
+    // Clear previous tab result state before starting a new execution attempt
+    clearTabResult(activeTab.id);
+    setQueryError(null);
+
     // Get the current mode
     const mode = currentMode;
     let sqlToExecute = trimmedContent;
@@ -264,13 +269,26 @@ export function SQLEditor() {
         setTabError(activeTab.id, errorMessage);
         return;
       }
+
+      if (validation.warnings.length > 0) {
+        toast.warning(validation.warnings.join(', '), { duration: 5000 });
+      }
     }
 
     // Check for destructive operations (only in SQL mode)
     if (mode === 'sql') {
-      const upperSQL = sqlToExecute.toUpperCase();
-      if ((upperSQL.includes('DELETE') || upperSQL.includes('DROP')) && querySettings.confirmDelete) {
-        if (!upperSQL.includes('WHERE') && !confirm('⚠️ This operation has no WHERE clause and will affect all rows. Continue?')) {
+      const isDeleteStatement = /^\s*DELETE\b/i.test(sqlToExecute);
+      const isDropStatement = /^\s*DROP\b/i.test(sqlToExecute);
+      const hasWhereClause = /\bWHERE\b/i.test(sqlToExecute);
+
+      if (isDeleteStatement && querySettings.confirmDelete && !hasWhereClause) {
+        if (!confirm('⚠️ This DELETE has no WHERE clause and will affect all rows. Continue?')) {
+          return;
+        }
+      }
+
+      if (isDropStatement && querySettings.confirmDrop) {
+        if (!confirm('⚠️ DROP operations are irreversible. Continue?')) {
           return;
         }
       }
@@ -281,10 +299,8 @@ export function SQLEditor() {
       updateTabContent(activeTab.id, currentContent);
     }
 
-    // Clear previous results for this tab
-    clearTabResult(activeTab.id);
+    // Set execution state
     setIsExecuting(true);
-    setQueryError(null);
     const startTime = Date.now();
 
     try {
@@ -298,7 +314,12 @@ export function SQLEditor() {
       const result = await api.executeQuery(request);
       
       // Store result in the active tab
-      setTabResult(activeTab.id, result);
+      setTabResult(activeTab.id, result, {
+        sql: sqlToExecute,
+        mode,
+        connectionId,
+        database: selectedDatabase,
+      });
 
       const executionTime = Date.now() - startTime;
 
@@ -425,11 +446,11 @@ export function SQLEditor() {
       </div>
 
       {/* Toolbar */}
-      <div className="h-10 border-b border-border flex items-center gap-2 px-2 bg-card">
+      <div className="h-9 border-b border-border flex items-center gap-1.5 px-2 bg-card">
         {/* Mode Toggle */}
         <div className="flex items-center border border-border rounded-md overflow-hidden">
           <button
-            className={`px-3 py-1 text-sm transition-colors ${
+            className={`px-2.5 py-0.5 text-xs transition-colors ${
               currentMode === 'sql'
                 ? 'bg-[#0078d4] text-white font-semibold'
                 : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
@@ -440,7 +461,7 @@ export function SQLEditor() {
             SQL
           </button>
           <button
-            className={`px-3 py-1 text-sm transition-colors ${
+            className={`px-2.5 py-0.5 text-xs transition-colors ${
               currentMode === 'simple'
                 ? 'bg-[#0078d4] text-white font-semibold'
                 : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
@@ -452,12 +473,12 @@ export function SQLEditor() {
           </button>
         </div>
 
-        <Button size="sm" onClick={handleExecute} disabled={isExecuting}>
-          <Play className="h-4 w-4 mr-2" />
+        <Button size="sm" className="h-7 px-2.5 text-xs" onClick={handleExecute} disabled={isExecuting}>
+          <img src={executeIcon} alt="" aria-hidden="true" className="h-3.5 w-3.5 mr-1.5" />
           Execute
         </Button>
-        <Button size="sm" variant="outline" onClick={handleFormat} disabled={isExecuting || currentMode === 'simple'} title="Format SQL (Ctrl+Shift+F)">
-          <Code2 className="h-4 w-4 mr-2" />
+        <Button size="sm" className="h-7 px-2.5 text-xs" variant="outline" onClick={handleFormat} disabled={isExecuting || currentMode === 'simple'} title="Format SQL (Ctrl+Shift+F)">
+          <Code2 className="h-3.5 w-3.5 mr-1.5" />
           Format
         </Button>
 

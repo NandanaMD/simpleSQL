@@ -19,7 +19,7 @@ export function IntroducingSimpleSyntaxDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-2xl">
             <Sparkles className="h-6 w-6 text-[#0078d4]" />
-            Introducing SimpleSyntax
+            Try SimpleSyntax
           </DialogTitle>
         </DialogHeader>
 

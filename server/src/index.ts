@@ -23,6 +23,50 @@ import backupRouter from './routes/backup';
 
 let server: ReturnType<typeof express.prototype.listen> | null = null;
 
+function enforceDevRuntimeGuard(): void {
+  if (process.env.NODE_ENV !== 'development') {
+    return;
+  }
+
+  const isElectronSpawned = process.env.RUN_UNDER_ELECTRON === '1';
+  const expectedElectronNodeVersion = process.env.ELECTRON_NODE_VERSION;
+  const expectedElectronAbi = process.env.ELECTRON_NODE_ABI;
+
+  logger.info('Runtime startup details', {
+    nodeVersion: process.version,
+    abi: process.versions.modules,
+    electron: process.versions.electron || 'none',
+    runUnderElectron: isElectronSpawned,
+    expectedElectronNodeVersion,
+    expectedElectronAbi,
+  });
+
+  if (!isElectronSpawned) {
+    logger.error('Blocked standalone dev server startup. Launch via Electron only.');
+    console.error('❌ Standalone server dev runtime is blocked. Use npm run dev from workspace root.');
+    process.exit(1);
+  }
+
+  if (expectedElectronNodeVersion && process.version !== expectedElectronNodeVersion) {
+    logger.error('Blocked dev runtime due to Node version mismatch with Electron runtime', {
+      currentNodeVersion: process.version,
+      expectedElectronNodeVersion,
+    });
+    console.error(`❌ Runtime mismatch. Server node=${process.version}, Electron node=${expectedElectronNodeVersion}.`);
+    process.exit(1);
+  }
+
+  if (expectedElectronAbi && process.versions.modules !== expectedElectronAbi) {
+    logger.error('Blocked dev runtime due to ABI mismatch with Electron runtime', {
+      nodeVersion: process.version,
+      currentAbi: process.versions.modules,
+      expectedElectronAbi,
+    });
+    console.error(`❌ ABI mismatch. Server ABI=${process.versions.modules}, Electron ABI=${expectedElectronAbi}.`);
+    process.exit(1);
+  }
+}
+
 export function createApp(): Application {
   const app = express();
 
@@ -194,6 +238,8 @@ process.on('unhandledRejection', (reason) => {
 
 // Start server if run directly or forked
 if (require.main === module || process.send) {
+  enforceDevRuntimeGuard();
+
   // When forked, listen for IPC messages
   const portToUse = process.env.SERVER_PORT === '0' 
     ? 0  // Use random available port

@@ -17,7 +17,21 @@ import type {
   ApiResponse,
 } from '@sql-ide/shared';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+function resolveApiBaseUrl(): string {
+  const runtimeApiPort = new URLSearchParams(window.location.search).get('apiPort');
+
+  if (runtimeApiPort) {
+    return `http://localhost:${runtimeApiPort}/api`;
+  }
+
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+
+  return '/api';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -26,6 +40,19 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const FATAL_TABLES_ERROR_COOLDOWN_MS = 15000;
+const tableRequestCooldown = new Map<string, { message: string; until: number }>();
+
+function isFatalNativeBindingError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('better_sqlite3.node') ||
+    lower.includes('node_module_version') ||
+    lower.includes('could not locate the bindings file') ||
+    lower.includes('compiled against a different node.js version')
+  );
+}
 
 // Add response interceptor to extract error messages
 api.interceptors.response.use(
@@ -95,8 +122,27 @@ export async function getSchemas(connectionId: string, database: string): Promis
 }
 
 export async function getTables(connectionId: string, database: string, schema: string): Promise<Table[]> {
-  const response = await api.get<ApiResponse<Table[]>>(`/metadata/tables/${connectionId}/${database}/${schema}`);
-  return response.data.data!;
+  const requestKey = `${connectionId}::${database}::${schema}`;
+  const cooldown = tableRequestCooldown.get(requestKey);
+
+  if (cooldown && cooldown.until > Date.now()) {
+    throw new Error(cooldown.message);
+  }
+
+  try {
+    const response = await api.get<ApiResponse<Table[]>>(`/metadata/tables/${connectionId}/${database}/${schema}`);
+    tableRequestCooldown.delete(requestKey);
+    return response.data.data!;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load tables';
+    if (isFatalNativeBindingError(message)) {
+      tableRequestCooldown.set(requestKey, {
+        message,
+        until: Date.now() + FATAL_TABLES_ERROR_COOLDOWN_MS,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function getTableStructure(

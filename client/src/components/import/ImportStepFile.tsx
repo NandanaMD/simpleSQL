@@ -9,9 +9,10 @@ import { toast } from 'sonner';
 
 export function ImportStepFile() {
   const {
-    file,
+    files,
     preview,
-    setFile,
+    setFiles,
+    removeFileAt,
     setPreview,
     setColumnMappings,
     setTableName,
@@ -20,7 +21,7 @@ export function ImportStepFile() {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleFileSelect = useCallback(async (selectedFile: File | null) => {
+  const loadPreviewForTemplateFile = useCallback(async (selectedFile: File | null) => {
     if (!selectedFile) return;
 
     // Validate file type
@@ -36,7 +37,6 @@ export function ImportStepFile() {
       return;
     }
 
-    setFile(selectedFile);
     setIsLoading(true);
 
     try {
@@ -63,22 +63,47 @@ export function ImportStepFile() {
       toast.success(`Preview loaded: ${previewData.rowCount.toLocaleString()} rows detected`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load preview');
-      setFile(null);
+      setFiles([]);
       setPreview(null);
     } finally {
       setIsLoading(false);
     }
-  }, [setFile, setPreview, setColumnMappings, setTableName]);
+  }, [setFiles, setPreview, setColumnMappings, setTableName]);
+
+  const handleFilesSelect = useCallback(async (selectedFiles: File[]) => {
+    if (!selectedFiles.length) return;
+
+    const maxSize = 100 * 1024 * 1024;
+    const validFiles = selectedFiles.filter((f) => f.name.toLowerCase().endsWith('.csv') && f.size <= maxSize);
+
+    const invalidTypeCount = selectedFiles.filter((f) => !f.name.toLowerCase().endsWith('.csv')).length;
+    const oversizedCount = selectedFiles.filter((f) => f.size > maxSize).length;
+
+    if (invalidTypeCount > 0) {
+      toast.error(`${invalidTypeCount} file(s) were skipped (only .csv is supported)`);
+    }
+
+    if (oversizedCount > 0) {
+      toast.error(`${oversizedCount} file(s) were skipped (size exceeds 100MB)`);
+    }
+
+    if (!validFiles.length) {
+      return;
+    }
+
+    setFiles(validFiles);
+    await loadPreviewForTemplateFile(validFiles[0]);
+  }, [loadPreviewForTemplateFile, setFiles]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
 
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) {
-      handleFileSelect(droppedFile);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length) {
+      void handleFilesSelect(droppedFiles);
     }
-  }, [handleFileSelect]);
+  }, [handleFilesSelect]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -91,11 +116,11 @@ export function ImportStepFile() {
   }, []);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      handleFileSelect(selectedFile);
+    const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
+    if (selectedFiles.length) {
+      void handleFilesSelect(selectedFiles);
     }
-  }, [handleFileSelect]);
+  }, [handleFilesSelect]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -108,7 +133,7 @@ export function ImportStepFile() {
       <div>
         <h3 className="text-lg font-semibold mb-2">Select CSV File</h3>
         <p className="text-sm text-muted-foreground">
-          Upload a CSV file to import into your database. Maximum file size: 100MB.
+          Upload one or more CSV files to import into your database. Maximum file size: 100MB each.
         </p>
       </div>
 
@@ -117,12 +142,12 @@ export function ImportStepFile() {
         className={`
           border-2 border-dashed transition-colors cursor-pointer
           ${isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}
-          ${file ? 'bg-muted/30' : ''}
+          ${files.length > 0 ? 'bg-muted/30' : ''}
         `}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onClick={() => !file && document.getElementById('file-input')?.click()}
+        onClick={() => files.length === 0 && document.getElementById('file-input')?.click()}
       >
         <CardContent className="flex flex-col items-center justify-center py-12">
           {isLoading ? (
@@ -130,12 +155,16 @@ export function ImportStepFile() {
               <Loader2 className="h-12 w-12 text-primary animate-spin mb-4" />
               <p className="text-sm text-muted-foreground">Loading preview...</p>
             </>
-          ) : file ? (
+          ) : files.length > 0 ? (
             <>
               <File className="h-12 w-12 text-primary mb-4" />
-              <p className="text-sm font-medium">{file.name}</p>
+              <p className="text-sm font-medium">
+                {files.length === 1 ? files[0].name : `${files.length} CSV files selected`}
+              </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {formatFileSize(file.size)}
+                {files.length === 1
+                  ? formatFileSize(files[0].size)
+                  : `${formatFileSize(files.reduce((sum, current) => sum + current.size, 0))} total`}
               </p>
               <Button
                 variant="outline"
@@ -143,11 +172,11 @@ export function ImportStepFile() {
                 className="mt-4"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setFile(null);
+                  setFiles([]);
                   setPreview(null);
                 }}
               >
-                Change File
+                Change Files
               </Button>
             </>
           ) : (
@@ -156,7 +185,7 @@ export function ImportStepFile() {
                 <FileUp className="h-8 w-8 text-primary" />
               </div>
               <p className="text-sm font-medium mb-1">
-                Drag and drop your CSV file here
+                Drag and drop your CSV files here
               </p>
               <p className="text-xs text-muted-foreground mb-4">or</p>
               <Button variant="outline" size="sm">
@@ -172,9 +201,44 @@ export function ImportStepFile() {
         id="file-input"
         type="file"
         accept=".csv"
+        multiple
         className="hidden"
         onChange={handleFileInput}
       />
+
+      {files.length > 1 && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <Label className="text-base font-semibold">Selected Files Queue</Label>
+              <span className="text-xs text-muted-foreground">Template preview uses first file</span>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+              {files.map((queuedFile, idx) => (
+                <div
+                  key={`${queuedFile.name}-${queuedFile.lastModified}-${queuedFile.size}`}
+                  className="flex items-center justify-between rounded-md border px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{queuedFile.name}</p>
+                    <p className="text-xs text-muted-foreground">{formatFileSize(queuedFile.size)}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFileAt(idx);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Preview */}
       {preview && (

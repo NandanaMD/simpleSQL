@@ -27,6 +27,23 @@ function logToFile(message: string) {
   }
 }
 
+function assertRuntimeLock(): void {
+  const nodeVersion = process.version;
+  const nodeAbi = process.versions.modules;
+  const electronVersion = process.versions.electron || 'unknown';
+
+  logToFile(`[Runtime] Node=${nodeVersion} ABI=${nodeAbi} Electron=${electronVersion}`);
+
+  try {
+    require('better-sqlite3');
+    logToFile('[Runtime] better-sqlite3 preload success');
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logToFile(`[Runtime] better-sqlite3 preload failed: ${details}`);
+    throw error;
+  }
+}
+
 async function startServer(): Promise<number> {
   return new Promise((resolve, reject) => {
     const serverPath = isDev
@@ -49,7 +66,9 @@ async function startServer(): Promise<number> {
     // In production, set NODE_PATH to help Electron's Node.js find modules in extraResources
     const nodeModulesPath = path.join(serverDir, 'node_modules');
     
+    // Force use of Electron's Node.js by specifying execPath
     serverProcess = fork(serverPath, [], {
+      execPath: process.execPath, // Use Electron's Node.js, not system Node.js
       execArgv,
       cwd: serverDir,
       env: {
@@ -57,6 +76,9 @@ async function startServer(): Promise<number> {
         NODE_ENV: isDev ? 'development' : 'production',
         SERVER_PORT: '0',
         RESOURCES_PATH: process.resourcesPath,
+        RUN_UNDER_ELECTRON: '1',
+        ELECTRON_NODE_VERSION: process.version,
+        ELECTRON_NODE_ABI: process.versions.modules,
         // Ensure Electron's Node.js can find modules outside asar
         NODE_PATH: nodeModulesPath,
       },
@@ -130,7 +152,7 @@ function createWindow(port: number): void {
   });
 
   const startURL = isDev
-    ? 'http://localhost:5173'
+    ? `http://localhost:5173/?apiPort=${port}`
     : `http://localhost:${port}`;
 
   mainWindow.loadURL(startURL);
@@ -149,6 +171,7 @@ app.whenReady().then(async () => {
     logToFile('[Electron] Starting application...');
     logToFile(`[Electron] App path: ${app.getAppPath()}`);
     logToFile(`[Electron] User data: ${app.getPath('userData')}`);
+    assertRuntimeLock();
     logToFile('[Electron] Starting server...');
     
     const port = await startServer();

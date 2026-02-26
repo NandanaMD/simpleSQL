@@ -41,6 +41,10 @@ function loadTabsFromStorage(): EditorTab[] {
       resultRowCount: undefined,
       executionTime: undefined,
       executionTimestamp: undefined,
+      lastExecutedSql: undefined,
+      lastExecutionMode: undefined,
+      lastExecutionConnectionId: undefined,
+      lastExecutionDatabase: undefined,
       errorInfo: null,
       decorations: undefined,
       translatedSql: undefined, // Don't restore ephemeral translated SQL
@@ -107,7 +111,16 @@ interface EditorStore {
   setTabConnection: (id: string, connectionId: string, database: string) => void;
   setTabMode: (id: string, mode: 'sql' | 'simple') => void;
   setTabTranslatedSql: (id: string, translatedSql: string | undefined) => void;
-  setTabResult: (id: string, result: QueryResult) => void;
+  setTabResult: (
+    id: string,
+    result: QueryResult,
+    executionMeta?: {
+      sql: string;
+      mode: 'sql' | 'simple';
+      connectionId: string;
+      database?: string;
+    }
+  ) => void;
   setTabError: (id: string, error: string | null) => void;
   setTabDecorations: (id: string, decorations: string[]) => void;
   clearTabResult: (id: string) => void;
@@ -222,7 +235,7 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
     });
   },
 
-  setTabResult: (id: string, result: QueryResult) => {
+  setTabResult: (id: string, result: QueryResult, executionMeta) => {
     set((state) => {
       const newTabs = state.tabs.map((tab) =>
         tab.id === id
@@ -234,6 +247,10 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
               resultRowCount: result.rowCount,
               executionTime: result.executionTime,
               executionTimestamp: new Date(),
+              lastExecutedSql: executionMeta?.sql,
+              lastExecutionMode: executionMeta?.mode,
+              lastExecutionConnectionId: executionMeta?.connectionId,
+              lastExecutionDatabase: executionMeta?.database,
               errorInfo: null,
             }
           : tab
@@ -256,6 +273,14 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
               errorInfo: error,
               resultRows: undefined,
               resultColumns: undefined,
+              resultCommand: undefined,
+              resultRowCount: undefined,
+              executionTime: undefined,
+              executionTimestamp: undefined,
+              lastExecutedSql: undefined,
+              lastExecutionMode: undefined,
+              lastExecutionConnectionId: undefined,
+              lastExecutionDatabase: undefined,
             }
           : tab
       );
@@ -284,6 +309,10 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
               resultRowCount: undefined,
               executionTime: undefined,
               executionTimestamp: undefined,
+              lastExecutedSql: undefined,
+              lastExecutionMode: undefined,
+              lastExecutionConnectionId: undefined,
+              lastExecutionDatabase: undefined,
               errorInfo: null,
               decorations: undefined,
             }

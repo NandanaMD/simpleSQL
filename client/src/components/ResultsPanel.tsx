@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useConnectionStore } from '../stores/connectionStore';
 import {
   useReactTable,
   getCoreRowModel,
@@ -136,8 +137,17 @@ const CellContent = React.memo<{ value: unknown; meta: CellMeta; formatSettings:
 
 CellContent.displayName = 'CellContent';
 
+function truncateQuery(sql: string, maxLength = 140) {
+  const normalized = sql.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
 export function ResultsPanel() {
   const { tabs, activeTabId, queryError, isExecuting } = useEditorStore();
+  const { connections } = useConnectionStore();
   const { format: formatSettings } = useSettingsStore();
   const [globalFilter, setGlobalFilter] = useState('');
 
@@ -147,6 +157,12 @@ export function ResultsPanel() {
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   const hasResult = activeTab?.resultRows && activeTab.resultRows.length >= 0;
+  const executedConnectionName = activeTab?.lastExecutionConnectionId
+    ? connections.find((connection) => connection.id === activeTab.lastExecutionConnectionId)?.name
+    : undefined;
+  const executedQueryPreview = activeTab?.lastExecutedSql
+    ? truncateQuery(activeTab.lastExecutedSql)
+    : undefined;
 
   const exportToCSV = () => {
     if (!activeTab?.resultRows || !activeTab.resultColumns) return;
@@ -250,75 +266,90 @@ export function ResultsPanel() {
   return (
     <div className="flex flex-col h-full bg-background border-t border-border">
       {/* Header */}
-      <div className="h-10 border-b border-border flex items-center justify-between px-3 bg-card">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">
-            Results {activeTab ? `— ${activeTab.title}` : ''}
-          </span>
+      <div className="border-b border-border px-3 py-2 bg-card">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">
+              Results {activeTab ? `— ${activeTab.title}` : ''}
+            </div>
+            {activeTab?.executionTimestamp && (
+              <div className="text-[11px] text-muted-foreground truncate">
+                {activeTab.resultCommand || 'QUERY'} • {activeTab.resultRowCount ?? 0} row{(activeTab.resultRowCount ?? 0) !== 1 ? 's' : ''} • {activeTab.executionTime ?? 0}ms • {formatTime(activeTab.executionTimestamp)}
+                {executedConnectionName ? ` • ${executedConnectionName}` : ''}
+                {activeTab.lastExecutionDatabase ? ` / ${activeTab.lastExecutionDatabase}` : ''}
+                {activeTab.lastExecutionMode ? ` • ${activeTab.lastExecutionMode.toUpperCase()}` : ''}
+              </div>
+            )}
+          </div>
+          {hasResult && (
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  placeholder="Filter results..."
+                  value={globalFilter}
+                  onChange={(e) => setGlobalFilter(e.target.value)}
+                  className="h-7 text-xs pl-7 w-48"
+                />
+              </div>
+              <div className="relative">
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  onClick={() => setShowExportMenu(!showExportMenu)} 
+                  className="h-7 text-xs"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Export
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-8 bg-card border rounded-lg shadow-lg py-1 z-50 min-w-[150px]">
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                      onClick={() => {
+                        exportToCSV();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      Export as CSV
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                      onClick={() => {
+                        exportToJSON();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      Export as JSON
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                      onClick={() => {
+                        exportToSQL();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      Export as SQL INSERT
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                      onClick={() => {
+                        exportToMarkdown();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      Export as Markdown
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-        {hasResult && (
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
-              <Input
-                placeholder="Filter results..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="h-7 text-xs pl-7 w-48"
-              />
-            </div>
-            <div className="relative">
-              <Button 
-                size="sm" 
-                variant="ghost" 
-                onClick={() => setShowExportMenu(!showExportMenu)} 
-                className="h-7 text-xs"
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Export
-                <ChevronDown className="h-3 w-3 ml-1" />
-              </Button>
-              {showExportMenu && (
-                <div className="absolute right-0 top-8 bg-card border rounded-lg shadow-lg py-1 z-50 min-w-[150px]">
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => {
-                      exportToCSV();
-                      setShowExportMenu(false);
-                    }}
-                  >
-                    Export as CSV
-                  </button>
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => {
-                      exportToJSON();
-                      setShowExportMenu(false);
-                    }}
-                  >
-                    Export as JSON
-                  </button>
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => {
-                      exportToSQL();
-                      setShowExportMenu(false);
-                    }}
-                  >
-                    Export as SQL INSERT
-                  </button>
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => {
-                      exportToMarkdown();
-                      setShowExportMenu(false);
-                    }}
-                  >
-                    Export as Markdown
-                  </button>
-                </div>
-              )}
-            </div>
+        {hasResult && executedQueryPreview && (
+          <div className="mt-1 text-[11px] text-muted-foreground truncate" title={activeTab?.lastExecutedSql}>
+            From query: {executedQueryPreview}
           </div>
         )}
       </div>

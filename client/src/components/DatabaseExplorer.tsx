@@ -5,12 +5,16 @@ import { useImportStore } from '../stores/importStore';
 import { useEditorStore } from '../stores/editorStore';
 import { BackupManager } from './BackupManager';
 import * as api from '../lib/api';
-import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, CheckCircle2, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Plus } from 'lucide-react';
+import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Plus, Key, Lock, Unlock, Columns3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
+import connectionIcon from '../../../assets/icons/connection.svg';
+import selectedIcon from '../../../assets/icons/selected.svg';
+import databaseSelectedIcon from '../../../assets/icons/database_selected.svg';
+import databaseNotSelectedIcon from '../../../assets/icons/database_not_selected.svg';
 
 export function DatabaseExplorer() {
   const { connections, selectedConnectionId, selectedDatabase, setActiveConnection } = useConnectionStore();
@@ -23,7 +27,14 @@ export function DatabaseExplorer() {
     nodeId: string; 
     connectionId: string; 
     database: string; 
-    table?: string; 
+    table?: string;
+    column?: string;
+    columnMeta?: {
+      dataType: string;
+      isPrimaryKey: boolean;
+      isNullable: boolean;
+      isUnique: boolean;
+    };
     type: string 
   } | null>(null);
   const [createDbDialog, setCreateDbDialog] = useState<{ open: boolean; connectionId: string | null }>({ open: false, connectionId: null });
@@ -46,7 +57,7 @@ export function DatabaseExplorer() {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
-  const handleToggle = async (nodeId: string, type: string, connectionId: string, database?: string) => {
+  const handleToggle = async (nodeId: string, type: string, connectionId: string, database?: string, table?: string) => {
     const isExpanded = expandedNodes.has(nodeId);
 
     if (!isExpanded) {
@@ -79,6 +90,27 @@ export function DatabaseExplorer() {
             isLoading: false,
           }));
           setNodeChildren(nodeId, children);
+        } else if ((type === 'table' || type === 'view') && database && table) {
+          // Load columns for table
+          const structure = await api.getTableStructure(connectionId, database, 'main', table);
+          const children = structure.columns.map((col) => ({
+            id: `${connectionId}:${database}:${table}:${col.name}`,
+            type: 'column' as const,
+            label: col.name,
+            connectionId,
+            database,
+            table,
+            column: col.name,
+            columnMeta: {
+              dataType: col.dataType,
+              isPrimaryKey: col.isPrimaryKey,
+              isNullable: col.isNullable,
+              isUnique: col.isUnique,
+            },
+            isExpanded: false,
+            isLoading: false,
+          }));
+          setNodeChildren(nodeId, children);
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Failed to load data');
@@ -105,22 +137,20 @@ export function DatabaseExplorer() {
 
   const handleContextMenu = (
     e: React.MouseEvent, 
-    nodeId: string, 
-    type: string, 
-    connectionId: string, 
-    database?: string, 
-    table?: string
+    node: typeof nodes[0]
   ) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      nodeId,
-      type,
-      connectionId,
-      database: database || '',
-      table,
+      nodeId: node.id,
+      type: node.type,
+      connectionId: node.connectionId,
+      database: node.database || '',
+      table: node.table,
+      column: node.column,
+      columnMeta: node.columnMeta,
     });
   };
 
@@ -366,6 +396,43 @@ export function DatabaseExplorer() {
     toast.success('Database explorer refreshed');
   };
 
+  const handleCopyColumnName = () => {
+    if (!contextMenu || !contextMenu.column) return;
+    
+    navigator.clipboard.writeText(contextMenu.column);
+    toast.success(`Copied "${contextMenu.column}" to clipboard`);
+    setContextMenu(null);
+  };
+
+  const handleCopyColumnSelect = () => {
+    if (!contextMenu || !contextMenu.column || !contextMenu.table) return;
+    
+    const sql = `SELECT "${contextMenu.column}" FROM "${contextMenu.table}";`;
+    navigator.clipboard.writeText(sql);
+    toast.success('SELECT query copied to clipboard');
+    setContextMenu(null);
+  };
+
+  const handleViewColumnDetails = () => {
+    if (!contextMenu || !contextMenu.column || !contextMenu.columnMeta) return;
+    
+    const tabId = createTab(contextMenu.connectionId, contextMenu.database);
+    const details = [
+      `-- Column: ${contextMenu.column}`,
+      `-- Table: ${contextMenu.table}`,
+      `-- Database: ${contextMenu.database}`,
+      ``,
+      `-- Data Type: ${contextMenu.columnMeta.dataType}`,
+      `-- Nullable: ${contextMenu.columnMeta.isNullable ? 'YES' : 'NO'}`,
+      `-- Primary Key: ${contextMenu.columnMeta.isPrimaryKey ? 'YES' : 'NO'}`,
+      `-- Unique: ${contextMenu.columnMeta.isUnique ? 'YES' : 'NO'}`,
+    ].join('\n');
+    
+    updateTabContent(tabId, details);
+    toast.success('Column details loaded');
+    setContextMenu(null);
+  };
+
   const handleCreateDatabase = () => {
     if (!contextMenu || contextMenu.type !== 'connection') {
       return;
@@ -467,7 +534,7 @@ export function DatabaseExplorer() {
   const renderNode = (node: typeof nodes[0], level: number = 0): React.ReactNode => {
     const isExpanded = expandedNodes.has(node.id);
     const isLoading = loadingNodes.has(node.id);
-    const hasChildren = node.type !== 'table' && node.type !== 'view';
+    const hasChildren = node.type !== 'column'; // All types except column can have children
     const isSelected = node.type === 'database' && 
                       node.connectionId === selectedConnectionId && 
                       node.database === selectedDatabase;
@@ -476,12 +543,30 @@ export function DatabaseExplorer() {
     const getIcon = () => {
       switch (node.type) {
         case 'connection':
-          return <Database className="h-4 w-4" />;
+          return <img src={connectionIcon} alt="" aria-hidden="true" className="h-4 w-4" />;
         case 'database':
-          return <Database className="h-4 w-4" />;
+          return (
+            <img
+              src={isSelected ? databaseSelectedIcon : databaseNotSelectedIcon}
+              alt=""
+              aria-hidden="true"
+              className="h-4 w-4"
+            />
+          );
         case 'table':
         case 'view':
           return <Table className="h-4 w-4" />;
+        case 'column':
+          // Choose icon based on column properties
+          if (node.columnMeta?.isPrimaryKey) {
+            return <Key className="h-3.5 w-3.5 text-amber-500" />;
+          } else if (node.columnMeta?.isUnique) {
+            return <Lock className="h-3.5 w-3.5 text-blue-500" />;
+          } else if (!node.columnMeta?.isNullable) {
+            return <Columns3 className="h-3.5 w-3.5 text-green-600" />;
+          } else {
+            return <Unlock className="h-3.5 w-3.5 text-muted-foreground" />;
+          }
         default:
           return <Table className="h-4 w-4" />;
       }
@@ -494,12 +579,14 @@ export function DatabaseExplorer() {
             isSelected ? 'bg-primary/20 border-l-4 border-primary font-semibold' : ''
           } ${
             isConnectionSelected && !isSelected ? 'bg-accent/50' : ''
+          } ${
+            node.type === 'column' ? 'text-xs text-muted-foreground' : 'text-sm'
           }`}
           style={{ paddingLeft: `${level * 12 + 8}px` }}
           onClick={() => {
             // Single click - expand/collapse only
             if (hasChildren) {
-              handleToggle(node.id, node.type, node.connectionId, node.database);
+              handleToggle(node.id, node.type, node.connectionId, node.database, node.table);
             }
           }}
           onDoubleClick={(e) => {
@@ -513,8 +600,8 @@ export function DatabaseExplorer() {
             }
           }}
           onContextMenu={(e) => {
-            if (node.type === 'table' || node.type === 'database' || node.type === 'connection' || node.type === 'view') {
-              handleContextMenu(e, node.id, node.type, node.connectionId, node.database, node.type === 'table' || node.type === 'view' ? node.label : undefined);
+            if (node.type === 'table' || node.type === 'database' || node.type === 'connection' || node.type === 'view' || node.type === 'column') {
+              handleContextMenu(e, node);
             }
           }}
         >
@@ -531,10 +618,13 @@ export function DatabaseExplorer() {
           )}
           {!hasChildren && <span className="w-3" />}
           {getIcon()}
-          <span className={`text-sm truncate flex-1 ${isSelected ? 'text-primary' : ''}`}>
+          <span className={`truncate flex-1 ${isSelected ? 'text-primary' : ''} ${node.type === 'column' ? 'font-mono' : ''}`}>
             {node.label}
+            {node.type === 'column' && node.columnMeta && (
+              <span className="ml-1 text-muted-foreground/70">({node.columnMeta.dataType})</span>
+            )}
           </span>
-          {isSelected && <CheckCircle2 className="h-4 w-4 text-primary" />}
+          {isSelected && <img src={selectedIcon} alt="" aria-hidden="true" className="h-4 w-4 text-primary" />}
         </div>
 
         {isExpanded && node.children && node.children.map((child) => renderNode(child, level + 1))}
@@ -559,7 +649,7 @@ export function DatabaseExplorer() {
       {selectedConnectionId && selectedDatabase && (
         <div className="mb-2 px-2 py-2 bg-primary/10 border-l-4 border-primary rounded-r-md">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-primary" />
+            <img src={selectedIcon} alt="" aria-hidden="true" className="h-4 w-4 text-primary" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-primary truncate">
                 {connections.find(c => c.id === selectedConnectionId)?.name}
@@ -713,7 +803,33 @@ export function DatabaseExplorer() {
             </>
           )}
 
-          {contextMenu.type !== 'table' && contextMenu.type !== 'database' && contextMenu.type !== 'connection' && (
+          {contextMenu.type === 'column' && (
+            <>
+              <button
+                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
+                onClick={handleCopyColumnName}
+              >
+                <Copy className="h-4 w-4" />
+                Copy Column Name
+              </button>
+              <button
+                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
+                onClick={handleCopyColumnSelect}
+              >
+                <Code className="h-4 w-4" />
+                Copy SELECT Query
+              </button>
+              <button
+                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
+                onClick={handleViewColumnDetails}
+              >
+                <Eye className="h-4 w-4" />
+                View Details
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === 'view' && (
             <>
               <button
                 className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"

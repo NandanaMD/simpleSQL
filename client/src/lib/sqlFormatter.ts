@@ -63,12 +63,13 @@ export function formatSQL(sql: string, options: { indentSize?: number } = {}): s
 /**
  * Validates SQL syntax (basic validation)
  */
-export function validateSQL(sql: string): { valid: boolean; errors: string[] } {
+export function validateSQL(sql: string): { valid: boolean; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
   
   if (!sql || !sql.trim()) {
     errors.push('Query is empty');
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   // Check for balanced parentheses
@@ -100,21 +101,23 @@ export function validateSQL(sql: string): { valid: boolean; errors: string[] } {
   const upperSQL = sql.toUpperCase();
   const hasSelect = upperSQL.includes('SELECT');
   const hasFrom = upperSQL.includes('FROM');
-  const hasDelete = upperSQL.includes('DELETE');
-  const hasDrop = upperSQL.includes('DROP');
+  const isDeleteStatement = /^\s*DELETE\b/i.test(sql);
+  const isUpdateStatement = /^\s*UPDATE\b/i.test(sql);
+  const hasWhereClause = /\bWHERE\b/i.test(sql);
 
   if (hasSelect && !hasFrom && !upperSQL.includes('SELECT NOW()') && !upperSQL.includes('SELECT VERSION()')) {
     errors.push('SELECT statement typically requires a FROM clause');
   }
 
   // Check for potentially dangerous operations
-  if ((hasDelete || hasDrop) && !upperSQL.includes('WHERE')) {
-    errors.push('Warning: Destructive operation without WHERE clause');
+  if ((isDeleteStatement || isUpdateStatement) && !hasWhereClause) {
+    warnings.push('Destructive operation without WHERE clause');
   }
 
   return {
     valid: errors.length === 0,
     errors,
+    warnings,
   };
 }
 
