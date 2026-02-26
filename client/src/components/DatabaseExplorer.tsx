@@ -3,8 +3,9 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useExplorerStore } from '../stores/explorerStore';
 import { useImportStore } from '../stores/importStore';
 import { useEditorStore } from '../stores/editorStore';
+import { BackupManager } from './BackupManager';
 import * as api from '../lib/api';
-import { ChevronRight, ChevronDown, Database, Table, FolderTree, Loader2, Check, CheckCircle2, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Plus } from 'lucide-react';
+import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, CheckCircle2, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
 import { Input } from './ui/input';
@@ -22,12 +23,12 @@ export function DatabaseExplorer() {
     nodeId: string; 
     connectionId: string; 
     database: string; 
-    schema?: string; 
     table?: string; 
     type: string 
   } | null>(null);
   const [createDbDialog, setCreateDbDialog] = useState<{ open: boolean; connectionId: string | null }>({ open: false, connectionId: null });
   const [newDbName, setNewDbName] = useState('');
+  const [backupManager, setBackupManager] = useState<{ open: boolean; connectionId: string; database: string } | null>(null);
 
   useEffect(() => {
     // Add all connections to explorer when they change
@@ -45,7 +46,7 @@ export function DatabaseExplorer() {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
-  const handleToggle = async (nodeId: string, type: string, connectionId: string, database?: string, schema?: string) => {
+  const handleToggle = async (nodeId: string, type: string, connectionId: string, database?: string) => {
     const isExpanded = expandedNodes.has(nodeId);
 
     if (!isExpanded) {
@@ -65,29 +66,15 @@ export function DatabaseExplorer() {
           }));
           setNodeChildren(nodeId, children);
         } else if (type === 'database' && database) {
-          // Load schemas
-          const schemas = await api.getSchemas(connectionId, database);
-          const children = schemas.map((schema) => ({
-            id: `${connectionId}:${database}:${schema.name}`,
-            type: 'schema' as const,
-            label: schema.name,
-            connectionId,
-            database,
-            schema: schema.name,
-            isExpanded: false,
-            isLoading: false,
-          }));
-          setNodeChildren(nodeId, children);
-        } else if (type === 'schema' && database && schema) {
-          // Load tables
-          const tables = await api.getTables(connectionId, database, schema);
+          // Load tables directly (SQLite doesn't use schemas in navigation)
+          const tables = await api.getTables(connectionId, database, 'main');
           const children = tables.map((table) => ({
-            id: `${connectionId}:${database}:${schema}:${table.name}`,
+            id: `${connectionId}:${database}:${table.name}`,
             type: table.type === 'view' ? ('view' as const) : ('table' as const),
             label: table.name,
             connectionId,
             database,
-            schema,
+            table: table.name,
             isExpanded: false,
             isLoading: false,
           }));
@@ -122,7 +109,6 @@ export function DatabaseExplorer() {
     type: string, 
     connectionId: string, 
     database?: string, 
-    schema?: string, 
     table?: string
   ) => {
     e.preventDefault();
@@ -134,7 +120,6 @@ export function DatabaseExplorer() {
       type,
       connectionId,
       database: database || '',
-      schema,
       table,
     });
   };
@@ -150,59 +135,59 @@ export function DatabaseExplorer() {
     openWizard({
       connectionId: contextMenu.connectionId,
       database: contextMenu.database,
-      schema: contextMenu.schema,
+      schema: 'main', // SQLite always uses 'main' schema internally
       table: contextMenu.table,
     });
     setContextMenu(null);
   };
 
   const handleGenerateSelect = () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     const tabId = createTab(contextMenu.connectionId, contextMenu.database);
-    const sql = `SELECT * FROM "${contextMenu.schema}"."${contextMenu.table}" LIMIT 100;`;
+    const sql = `SELECT * FROM "${contextMenu.table}" LIMIT 100;`;
     updateTabContent(tabId, sql);
     toast.success('SELECT query generated');
     setContextMenu(null);
   };
 
   const handleGenerateInsert = () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     const tabId = createTab(contextMenu.connectionId, contextMenu.database);
-    const sql = `INSERT INTO "${contextMenu.schema}"."${contextMenu.table}" (column1, column2) VALUES (value1, value2);`;
+    const sql = `INSERT INTO "${contextMenu.table}" (column1, column2) VALUES (value1, value2);`;
     updateTabContent(tabId, sql);
     toast.success('INSERT template generated');
     setContextMenu(null);
   };
 
   const handleGenerateUpdate = () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     const tabId = createTab(contextMenu.connectionId, contextMenu.database);
-    const sql = `UPDATE "${contextMenu.schema}"."${contextMenu.table}"\nSET column1 = value1\nWHERE condition;`;
+    const sql = `UPDATE "${contextMenu.table}"\nSET column1 = value1\nWHERE condition;`;
     updateTabContent(tabId, sql);
     toast.success('UPDATE template generated');
     setContextMenu(null);
   };
 
   const handleGenerateDelete = () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     const tabId = createTab(contextMenu.connectionId, contextMenu.database);
-    const sql = `DELETE FROM "${contextMenu.schema}"."${contextMenu.table}"\nWHERE condition;`;
+    const sql = `DELETE FROM "${contextMenu.table}"\nWHERE condition;`;
     updateTabContent(tabId, sql);
     toast.warning('DELETE template generated - use WHERE clause carefully!');
     setContextMenu(null);
   };
 
   const handleViewStructure = async () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     try {
       const structure = await api.getTableStructure(
         contextMenu.connectionId,
         contextMenu.database,
-        contextMenu.schema,
+        'main',
         contextMenu.table
       );
       const tabId = createTab(contextMenu.connectionId, contextMenu.database);
-      const structureInfo = `-- Table: ${contextMenu.schema}.${contextMenu.table}\n\n${structure.columns.map(col => 
+      const structureInfo = `-- Table: ${contextMenu.table}\n-- Database: ${contextMenu.database}\n\n${structure.columns.map(col => 
         `-- ${col.name}: ${col.dataType}${col.isNullable ? '' : ' NOT NULL'}${col.isPrimaryKey ? ' PRIMARY KEY' : ''}${col.defaultValue ? ` DEFAULT ${col.defaultValue}` : ''}`
       ).join('\n')}`;
       updateTabContent(tabId, structureInfo);
@@ -224,9 +209,9 @@ export function DatabaseExplorer() {
   };
 
   const handleDropTable = async () => {
-    if (!contextMenu || !contextMenu.table || !contextMenu.schema) return;
+    if (!contextMenu || !contextMenu.table) return;
     
-    const tableName = `${contextMenu.schema}.${contextMenu.table}`;
+    const tableName = contextMenu.table;
     const confirmed = confirm(
       `⚠️ DROP TABLE: ${tableName}\n\n` +
       `This will permanently delete the table and ALL its data.\n` +
@@ -240,7 +225,7 @@ export function DatabaseExplorer() {
     }
     
     try {
-      const sql = `DROP TABLE "${contextMenu.schema}"."${contextMenu.table}";`;
+      const sql = `DROP TABLE "${contextMenu.table}";`;
       await api.executeQuery({
         connectionId: contextMenu.connectionId,
         sql,
@@ -249,27 +234,27 @@ export function DatabaseExplorer() {
       
       toast.success(`Table ${contextMenu.table} dropped successfully`);
       
-      // Refresh the schema node to reload tables
-      const schemaNodeId = `${contextMenu.connectionId}:${contextMenu.database}:${contextMenu.schema}`;
-      setNodeLoading(schemaNodeId, true);
+      // Refresh the database node to reload tables
+      const databaseNodeId = `${contextMenu.connectionId}:${contextMenu.database}`;
+      setNodeLoading(databaseNodeId, true);
       
       try {
-        const tables = await api.getTables(contextMenu.connectionId, contextMenu.database, contextMenu.schema);
+        const tables = await api.getTables(contextMenu.connectionId, contextMenu.database, 'main');
         const children = tables.map((table) => ({
-          id: `${contextMenu.connectionId}:${contextMenu.database}:${contextMenu.schema}:${table.name}`,
+          id: `${contextMenu.connectionId}:${contextMenu.database}:${table.name}`,
           type: table.type === 'view' ? ('view' as const) : ('table' as const),
           label: table.name,
           connectionId: contextMenu.connectionId,
           database: contextMenu.database,
-          schema: contextMenu.schema,
+          table: table.name,
           isExpanded: false,
           isLoading: false,
         }));
         
         // Update children - this will trigger re-render and clean up old nodes
-        setNodeChildren(schemaNodeId, children);
+        setNodeChildren(databaseNodeId, children);
       } finally {
-        setNodeLoading(schemaNodeId, false);
+        setNodeLoading(databaseNodeId, false);
       }
     } catch (error) {
       toast.error(`Failed to drop table: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -307,42 +292,20 @@ export function DatabaseExplorer() {
     }
     
     try {
-      // Must connect to a DIFFERENT database to drop the target database
-      // Try common system databases in order of preference
-      let systemDb = 'postgres';
-      if (dbName === 'postgres') systemDb = 'template1';
-      
-      // First, terminate all connections to the target database
-      const terminateSql = `
-        SELECT pg_terminate_backend(pg_stat_activity.pid)
-        FROM pg_stat_activity
-        WHERE pg_stat_activity.datname = '${dbName}'
-          AND pid <> pg_backend_pid();
-      `;
-      
-      try {
-        await api.executeQuery({
-          connectionId: contextMenu.connectionId,
-          sql: terminateSql,
-          database: systemDb,
-        });
-      } catch (error) {
-        // Ignore errors if no connections to terminate
-      }
-      
-      // Now drop the database
+      // For SQLite, we don't need to terminate connections or connect to a system database
+      // Just drop the database directly
       const sql = `DROP DATABASE "${dbName}";`;
       await api.executeQuery({
         connectionId: contextMenu.connectionId,
         sql,
-        database: systemDb,
+        database: undefined,
       });
       
       toast.success(`Database ${dbName} dropped successfully`);
       
-      // If the dropped database was selected, switch to system database
+      // If the dropped database was selected, clear the active connection
       if (selectedDatabase === dbName) {
-        setActiveConnection(contextMenu.connectionId, systemDb);
+        // Don't try to switch to a system database - just refresh the databases list
       }
       
       // Force refresh the connection node to reload databases
@@ -432,12 +395,12 @@ export function DatabaseExplorer() {
     setNewDbName('');
     
     try {
-      // Connect to postgres database to create new database
+      // For SQLite, we don't need to specify an existing database to create a new one
       const sql = `CREATE DATABASE "${trimmedName}";`;
       await api.executeQuery({
         connectionId: connectionId,
         sql,
-        database: 'postgres',
+        database: undefined,
       });
       
       toast.success(`Database ${trimmedName} created successfully`);
@@ -516,10 +479,10 @@ export function DatabaseExplorer() {
           return <Database className="h-4 w-4" />;
         case 'database':
           return <Database className="h-4 w-4" />;
-        case 'schema':
-          return <FolderTree className="h-4 w-4" />;
         case 'table':
         case 'view':
+          return <Table className="h-4 w-4" />;
+        default:
           return <Table className="h-4 w-4" />;
       }
     };
@@ -536,7 +499,7 @@ export function DatabaseExplorer() {
           onClick={() => {
             // Single click - expand/collapse only
             if (hasChildren) {
-              handleToggle(node.id, node.type, node.connectionId, node.database, node.schema);
+              handleToggle(node.id, node.type, node.connectionId, node.database);
             }
           }}
           onDoubleClick={(e) => {
@@ -550,8 +513,8 @@ export function DatabaseExplorer() {
             }
           }}
           onContextMenu={(e) => {
-            if (node.type === 'table' || node.type === 'database' || node.type === 'connection') {
-              handleContextMenu(e, node.id, node.type, node.connectionId, node.database, node.schema, node.type === 'table' ? node.label : undefined);
+            if (node.type === 'table' || node.type === 'database' || node.type === 'connection' || node.type === 'view') {
+              handleContextMenu(e, node.id, node.type, node.connectionId, node.database, node.type === 'table' || node.type === 'view' ? node.label : undefined);
             }
           }}
         >
@@ -655,6 +618,20 @@ export function DatabaseExplorer() {
                 Select Database
               </button>
               <div className="h-px bg-border my-1" />
+              <button
+                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
+                onClick={() => {
+                  setBackupManager({
+                    open: true,
+                    connectionId: contextMenu.connectionId,
+                    database: contextMenu.database,
+                  });
+                  setContextMenu(null);
+                }}
+              >
+                <Database className="h-4 w-4" />
+                Backup & Restore...
+              </button>
               <button
                 className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
                 onClick={handleImportData}
@@ -801,6 +778,18 @@ export function DatabaseExplorer() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Backup Manager */}
+      {backupManager && (
+        <BackupManager
+          open={backupManager.open}
+          onOpenChange={(open) => {
+            if (!open) setBackupManager(null);
+          }}
+          connectionId={backupManager.connectionId}
+          database={backupManager.database}
+        />
+      )}
     </div>
   );
 }

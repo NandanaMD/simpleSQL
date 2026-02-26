@@ -34,9 +34,9 @@ const appConfig: Config = {
     host: process.env.SERVER_HOST || 'localhost',
   },
   query: {
-    timeoutMs: parseInt(process.env.QUERY_TIMEOUT_MS || '30000', 10),
-    maxResultRows: parseInt(process.env.MAX_RESULT_ROWS || '10000', 10),
-    batchInsertSize: parseInt(process.env.BATCH_INSERT_SIZE || '1000', 10),
+    timeoutMs: parseInt(process.env.QUERY_TIMEOUT_MS || '60000', 10), // Increased to 60s for complex queries
+    maxResultRows: parseInt(process.env.MAX_RESULT_ROWS || '50000', 10), // Increased to 50k for better UX
+    batchInsertSize: parseInt(process.env.BATCH_INSERT_SIZE || '5000', 10), // Increased to 5k for faster imports
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',

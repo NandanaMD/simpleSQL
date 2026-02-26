@@ -65,10 +65,10 @@ export const importCSV = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  if (!importRequest.connectionId || !importRequest.database || !importRequest.schema || !importRequest.tableName) {
+  if (!importRequest.connectionId || !importRequest.database || !importRequest.tableName) {
     res.status(400).json({
       success: false,
-      error: 'Missing required fields: connectionId, database, schema, tableName',
+      error: 'Missing required fields: connectionId, database, tableName',
     });
     return;
   }
@@ -81,8 +81,8 @@ export const importCSV = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Pass buffer directly instead of stream
-  const result = await importService.importCSV(req.file.buffer, req.file.originalname, importRequest);
+  // Pass buffer directly - importCSV is now synchronous with SQLite
+  const result = importService.importCSV(req.file.buffer, req.file.originalname, importRequest);
 
   res.json({
     success: true,

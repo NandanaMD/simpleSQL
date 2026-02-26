@@ -1,18 +1,15 @@
-import { Pool, PoolConfig } from 'pg';
 import { getConfigDatabase, saveConfig } from '../config/database';
 import { Connection, ConnectionConfig, ConnectionTestResult } from '@sql-ide/shared';
 import { ApiError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
 import { randomUUID } from 'crypto';
-
-const activePools = new Map<string, Pool>();
+import * as dbAdapter from './dbAdapter';
 
 export function createConnection(config: ConnectionConfig): Connection {
   const db = getConfigDatabase();
   const now = new Date().toISOString();
   const id = randomUUID();
 
-  // Check if name already exists
   const existing = Object.values(db.connections).find((c) => c.name === config.name);
   if (existing) {
     throw new ApiError(`Connection with name "${config.name}" already exists`, 409);
@@ -65,8 +62,7 @@ export function updateConnection(id: string, config: Partial<ConnectionConfig>):
   db.connections[id] = updated;
   saveConfig();
 
-  // Close existing pool if connection details changed
-  closePool(id);
+  closeConnectionDatabases(id);
 
   logger.info('Updated connection', { id });
   return updated;
@@ -82,132 +78,59 @@ export function deleteConnection(id: string): void {
   delete db.connections[id];
   saveConfig();
 
-  // Close and remove pool
-  closePool(id);
+  closeConnectionDatabases(id);
 
   logger.info('Deleted connection', { id });
 }
 
-export function createPool(connection: Connection, database?: string): Pool {
-  const poolKey = `${connection.id}:${database || connection.defaultDatabase}`;
+export function getDatabase(connection: Connection, database?: string) {
+  const dbName = database || connection.defaultDatabase;
+  const dbPath = dbAdapter.getDatabasePath(connection.id, dbName);
 
-  // Return existing pool if available
-  if (activePools.has(poolKey)) {
-    return activePools.get(poolKey)!;
-  }
+  const db = dbAdapter.initialize(dbPath);
 
-  const poolConfig: PoolConfig = {
-    host: connection.host,
-    port: connection.port,
-    user: connection.username,
-    password: connection.password,
-    database: database || connection.defaultDatabase,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-  };
+  logger.info('Retrieved database connection', { connectionId: connection.id, database: dbName });
 
-  const pool = new Pool(poolConfig);
-
-  pool.on('error', (err) => {
-    logger.error('Unexpected pool error', { connectionId: connection.id, error: err });
-  });
-
-  activePools.set(poolKey, pool);
-  logger.info('Created connection pool', { connectionId: connection.id, database });
-
-  return pool;
+  return db;
 }
 
-export function closePool(connectionId: string): void {
-  const keysToRemove: string[] = [];
-
-  for (const [key, pool] of activePools.entries()) {
-    if (key.startsWith(`${connectionId}:`)) {
-      pool.end().catch((err) => {
-        logger.error('Error closing pool', { connectionId, error: err });
-      });
-      keysToRemove.push(key);
-    }
-  }
-
-  keysToRemove.forEach((key) => activePools.delete(key));
-
-  if (keysToRemove.length > 0) {
-    logger.info('Closed connection pools', { connectionId, count: keysToRemove.length });
-  }
+export function closeConnectionDatabases(connectionId: string): void {
+  logger.info('Connection databases marked for closure', { connectionId });
 }
 
-export function closeAllPools(): Promise<void> {
-  const promises: Promise<void>[] = [];
-
-  for (const [key, pool] of activePools.entries()) {
-    promises.push(
-      pool.end().catch((err) => {
-        logger.error('Error closing pool during shutdown', { poolKey: key, error: err });
-      })
-    );
-  }
-
-  activePools.clear();
-  logger.info('Closed all connection pools');
-
-  return Promise.all(promises).then(() => undefined);
+export function closeAllDatabases(): void {
+  dbAdapter.closeAll();
+  logger.info('Closed all database connections');
 }
 
-export async function testConnection(config: ConnectionConfig): Promise<ConnectionTestResult> {
-  const pool = new Pool({
-    host: config.host,
-    port: config.port,
-    user: config.username,
-    password: config.password,
-    database: config.defaultDatabase,
-    max: 1,
-    connectionTimeoutMillis: 5000,
-  });
-
+export function testConnection(config: ConnectionConfig): ConnectionTestResult {
   try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT version()');
-    client.release();
-    await pool.end();
+    const testDbPath = dbAdapter.getDatabasePath('test', config.defaultDatabase);
+    const db = dbAdapter.initialize(testDbPath);
 
+    const result = db.execute('SELECT sqlite_version() as version');
     const version = result.rows[0]?.version || 'Unknown';
-    logger.info('Connection test successful', { host: config.host, database: config.defaultDatabase });
+
+    logger.info('Connection test successful', { database: config.defaultDatabase, version });
 
     return {
       success: true,
-      message: `Connected successfully. ${version}`,
+      message: `SQLite connection successful. Version: ${version}`,
     };
   } catch (error) {
-    await pool.end().catch(() => {
-      // Ignore cleanup errors
-    });
-
     let errorMessage = 'Unknown error';
     if (error instanceof Error) {
       errorMessage = error.message;
-      // Handle common connection errors with more helpful messages
-      if (errorMessage.includes('ECONNREFUSED')) {
-        errorMessage = `Cannot connect to PostgreSQL server at ${config.host}:${config.port}. Make sure PostgreSQL is running.`;
-      } else if (errorMessage.includes('ENOTFOUND')) {
-        errorMessage = `Host ${config.host} not found. Check your connection settings.`;
-      } else if (errorMessage.includes('authentication')) {
-        errorMessage = 'Authentication failed. Check your username and password.';
-      } else if (errorMessage.includes('database') && errorMessage.includes('does not exist')) {
-        errorMessage = `Database "${config.defaultDatabase}" does not exist.`;
-      }
     }
-    
+
     logger.warn('Connection test failed', {
-      host: config.host,
       database: config.defaultDatabase,
       error: errorMessage,
     });
 
     return {
       success: false,
-      message: 'Connection failed',
+      message: 'Connection test failed',
       error: errorMessage,
     };
   }

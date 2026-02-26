@@ -14,13 +14,13 @@
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
+    --muted: 210 40% 93%;
+    --muted-foreground: 215.4 16.3% 35%;
+    --accent: 210 40% 94%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
+    --border: 214.3 31.8% 85%;
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
@@ -55,6 +55,12 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-weight: 500;
+  }
+  
+  /* Bolder UI text */
+  button, input, select, textarea, label {
+    font-weight: 600;
   }
   
   /* Smooth animations for interactive elements only */
@@ -119,6 +125,53 @@
   
   .dark .error-token-inline {
     color: rgb(255, 100, 100) !important;
+  }
+  
+  /* Monaco Editor Bold Font Styling */
+  .monaco-editor .view-lines {
+    font-weight: 600 !important;
+  }
+  
+  .monaco-editor .margin-view-overlays .line-numbers {
+    font-weight: 600 !important;
+    opacity: 0.8;
+  }
+  
+  /* Stronger colors for light mode */
+  .monaco-editor:not(.vs-dark) .mtk1 {
+    color: #000000 !important;
+  }
+  
+  .monaco-editor:not(.vs-dark) .mtk5 {
+    color: #0000ff !important;
+    font-weight: 700 !important;
+  }
+  
+  .monaco-editor:not(.vs-dark) .mtk6 {
+    color: #098658 !important;
+    font-weight: 600 !important;
+  }
+  
+  .monaco-editor:not(.vs-dark) .mtk8 {
+    color: #a31515 !important;
+  }
+  
+  /* Enhanced colors for dark mode */
+  .monaco-editor.vs-dark .mtk5 {
+    font-weight: 700 !important;
+  }
+  
+  .monaco-editor.vs-dark .mtk6 {
+    font-weight: 600 !important;
+  }
+  
+  /* SimpleSyntax error highlighting */
+  .error-highlight {
+    background-color: rgba(255, 0, 0, 0.1);
+  }
+  
+  .error-highlight-inline {
+    text-decoration: underline wavy red;
   }
 }
 

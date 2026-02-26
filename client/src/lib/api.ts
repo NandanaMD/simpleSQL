@@ -160,4 +160,131 @@ export async function explainQuery(request: ExplainRequest): Promise<ExplainResu
   return response.data.data!;
 }
 
+// Autocomplete
+export interface AutocompleteSuggestion {
+  label: string;
+  kind: 'keyword' | 'table' | 'column' | 'function' | 'database';
+  detail?: string;
+  documentation?: string;
+  insertText?: string;
+  tableName?: string;
+}
+
+export async function getAutocompleteSuggestions(
+  connectionId: string,
+  database: string
+): Promise<AutocompleteSuggestion[]> {
+  const response = await api.get<ApiResponse<AutocompleteSuggestion[]>>(
+    `/autocomplete/suggestions`,
+    {
+      params: { connectionId, database },
+    }
+  );
+  return response.data.data!;
+}
+
+// Saved Queries
+export interface SavedQuery {
+  id: string;
+  name: string;
+  description?: string;
+  sql: string;
+  connectionId?: string;
+  database?: string;
+  folder?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function createSavedQuery(
+  data: Omit<SavedQuery, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<SavedQuery> {
+  const response = await api.post<ApiResponse<SavedQuery>>('/saved-queries', data);
+  return response.data.data!;
+}
+
+export async function getAllSavedQueries(): Promise<SavedQuery[]> {
+  const response = await api.get<ApiResponse<SavedQuery[]>>('/saved-queries');
+  return response.data.data!;
+}
+
+export async function getSavedQuery(id: string): Promise<SavedQuery> {
+  const response = await api.get<ApiResponse<SavedQuery>>(`/saved-queries/${id}`);
+  return response.data.data!;
+}
+
+export async function updateSavedQuery(
+  id: string,
+  updates: Partial<SavedQuery>
+): Promise<SavedQuery> {
+  const response = await api.put<ApiResponse<SavedQuery>>(`/saved-queries/${id}`, updates);
+  return response.data.data!;
+}
+
+export async function deleteSavedQuery(id: string): Promise<void> {
+  await api.delete(`/saved-queries/${id}`);
+}
+
+// Backup & Restore
+export interface BackupInfo {
+  filename: string;
+  size: string;
+  createdAt: string;
+  connectionId: string;
+  database: string;
+}
+
+export async function backupDatabase(
+  connectionId: string,
+  database: string
+): Promise<BackupInfo> {
+  const response = await api.post<ApiResponse<BackupInfo>>('/backup/create', {
+    connectionId,
+    database,
+  });
+  return response.data.data!;
+}
+
+export async function restoreDatabase(
+  connectionId: string,
+  database: string,
+  backupFilename: string
+): Promise<void> {
+  await api.post('/backup/restore', {
+    connectionId,
+    database,
+    backupFile: backupFilename,
+  });
+}
+
+export async function listBackups(
+  connectionId: string,
+  database: string
+): Promise<BackupInfo[]> {
+  const response = await api.get<ApiResponse<BackupInfo[]>>('/backup/list', {
+    params: { connectionId, database },
+  });
+  return response.data.data!;
+}
+
+export async function deleteBackup(filename: string): Promise<void> {
+  await api.delete(`/backup/${filename}`);
+}
+
+export async function downloadBackup(filename: string): Promise<void> {
+  const response = await api.get(`/backup/download/${filename}`, {
+    responseType: 'blob',
+  });
+  
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export default api;

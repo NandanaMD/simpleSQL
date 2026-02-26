@@ -4,11 +4,25 @@ import appConfig from '../config';
 import logger from '../utils/logger';
 import { Connection } from '@sql-ide/shared';
 
-interface ConfigStore {
-  connections: Record<string, Connection>;
+export interface SavedQuery {
+  id: string;
+  name: string;
+  description?: string;
+  sql: string;
+  connectionId?: string;
+  database?: string;
+  folder?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
-let configStore: ConfigStore = { connections: {} };
+interface ConfigStore {
+  connections: Record<string, Connection>;
+  savedQueries: Record<string, SavedQuery>;
+}
+
+let configStore: ConfigStore = { connections: {}, savedQueries: {} };
 const configPath = appConfig.database.configDbPath.replace('.db', '.json');
 
 export function initConfigDatabase(): void {

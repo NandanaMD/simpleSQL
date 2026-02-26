@@ -9,7 +9,7 @@ const upload = multer({
   limits: {
     fileSize: appConfig.csv.maxSizeMB * 1024 * 1024,
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     // Accept CSV files
     if (file.mimetype === 'text/csv' || 
         file.mimetype === 'application/csv' || 
@@ -22,7 +22,7 @@ const upload = multer({
 });
 
 // Error handler for multer
-const handleMulterError = (err: any, req: Request, res: Response, next: NextFunction) => {
+const handleMulterError = (err: any, _req: Request, res: Response, next: NextFunction) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({
@@ -41,7 +41,7 @@ const handleMulterError = (err: any, req: Request, res: Response, next: NextFunc
       error: err.message || 'File upload failed',
     });
   }
-  next();
+  return next();
 };
 
 const router = Router();

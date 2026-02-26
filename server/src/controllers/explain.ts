@@ -14,7 +14,7 @@ export const explainQuery = asyncHandler(async (req: Request, res: Response) => 
     return;
   }
 
-  const result = await explainService.explainQuery(request);
+  const result = explainService.explainQuery(request);
 
   res.json({
     success: true,

@@ -1,65 +1,121 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import path from 'path';
 import isDev from 'electron-is-dev';
 import { fork, ChildProcess } from 'child_process';
+import fs from 'fs';
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort: number = 3000;
 
+// Log file for debugging production issues
+const logPath = isDev 
+  ? path.join(__dirname, '../../electron/logs/electron.log') 
+  : path.join(app.getPath('userData'), 'logs', 'electron.log');
+
+function logToFile(message: string) {
+  try {
+    const logDir = path.dirname(logPath);
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
+    console.log(message);
+  } catch (error) {
+    console.error('Failed to write to log:', error);
+  }
+}
+
 async function startServer(): Promise<number> {
   return new Promise((resolve, reject) => {
     const serverPath = isDev
       ? path.join(__dirname, '../../server/src/index.ts')
-      : path.join(process.resourcesPath, 'server/dist/index.js');
+      : path.join(process.resourcesPath, 'server', 'index.js');
+
+    logToFile(`Starting server from: ${serverPath}`);
+    logToFile(`Server path exists: ${fs.existsSync(serverPath)}`);
+    logToFile(`isDev: ${isDev}`);
+    logToFile(`process.resourcesPath: ${process.resourcesPath}`);
 
     const execArgv = isDev ? ['-r', 'tsx/cjs'] : [];
+    const serverDir = isDev 
+      ? path.join(__dirname, '../../server')
+      : path.join(process.resourcesPath, 'server');
 
+    logToFile(`Server working directory: ${serverDir}`);
+
+    // Use fork in both dev and production
+    // In production, set NODE_PATH to help Electron's Node.js find modules in extraResources
+    const nodeModulesPath = path.join(serverDir, 'node_modules');
+    
     serverProcess = fork(serverPath, [], {
       execArgv,
+      cwd: serverDir,
       env: {
         ...process.env,
         NODE_ENV: isDev ? 'development' : 'production',
-        SERVER_PORT: '0', // Use random available port
+        SERVER_PORT: '0',
+        RESOURCES_PATH: process.resourcesPath,
+        // Ensure Electron's Node.js can find modules outside asar
+        NODE_PATH: nodeModulesPath,
       },
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });
 
-    serverProcess.stdout?.on('data', (data) => {
-      const message = data.toString();
-      console.log(`[Server] ${message}`);
-
-      // Extract port from server log
-      const portMatch = message.match(/Server started on.*:(\d+)/);
-      if (portMatch) {
-        serverPort = parseInt(portMatch[1], 10);
+    // Listen for IPC messages from server
+    serverProcess.on('message', (message: any) => {
+      logToFile(`[Server IPC] ${JSON.stringify(message)}`);
+      if (message.type === 'server-ready' && message.port) {
+        serverPort = message.port;
         resolve(serverPort);
       }
     });
 
+    serverProcess.stdout?.on('data', (data) => {
+      const message = data.toString();
+      logToFile(`[Server] ${message}`);
+
+      // Extract port from server log
+      if (serverPort === 3000) {
+        const portMatch = message.match(/Server started on.*:(\d+)/);
+        if (portMatch) {
+          serverPort = parseInt(portMatch[1], 10);
+          resolve(serverPort);
+        }
+      }
+    });
+
     serverProcess.stderr?.on('data', (data) => {
-      console.error(`[Server Error] ${data.toString()}`);
+      const errorMsg = data.toString();
+      logToFile(`[Server Error] ${errorMsg}`);
     });
 
     serverProcess.on('error', (error) => {
-      console.error('[Server] Failed to start:', error);
+      logToFile(`[Server] Failed to start: ${error.message}`);
       reject(error);
     });
 
     serverProcess.on('exit', (code) => {
-      console.log(`[Server] Exited with code ${code}`);
+      logToFile(`[Server] Exited with code ${code}`);
     });
 
     // Timeout after 10 seconds
     setTimeout(() => {
       if (serverPort === 3000) {
-        reject(new Error('Server failed to start within timeout'));
+        const error = new Error('Server failed to start within timeout');
+        logToFile(`[Server] Timeout: ${error.message}`);
+        reject(error);
       }
     }, 10000);
   });
 }
 
 function createWindow(port: number): void {
+  const iconPath = isDev
+    ? path.join(__dirname, '../../assets/favicon.ico')
+    : path.join(process.resourcesPath, 'assets/favicon.ico');
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -68,7 +124,8 @@ function createWindow(port: number): void {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    title: 'SQL IDE',
+    title: 'SimpleSQL',
+    icon: iconPath,
     backgroundColor: '#1e1e1e',
   });
 
@@ -89,9 +146,13 @@ function createWindow(port: number): void {
 
 app.whenReady().then(async () => {
   try {
-    console.log('[Electron] Starting server...');
+    logToFile('[Electron] Starting application...');
+    logToFile(`[Electron] App path: ${app.getAppPath()}`);
+    logToFile(`[Electron] User data: ${app.getPath('userData')}`);
+    logToFile('[Electron] Starting server...');
+    
     const port = await startServer();
-    console.log(`[Electron] Server started on port ${port}`);
+    logToFile(`[Electron] Server started on port ${port}`);
 
     // Wait a bit for server to fully initialize
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -104,7 +165,15 @@ app.whenReady().then(async () => {
       }
     });
   } catch (error) {
-    console.error('[Electron] Failed to start application:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logToFile(`[Electron] Failed to start application: ${errorMessage}`);
+    
+    // Show error dialog to user
+    dialog.showErrorBox(
+      'SimpleSQL Failed to Start',
+      `The application failed to start. Error: ${errorMessage}\n\nLog file: ${logPath}`
+    );
+    
     app.quit();
   }
 });

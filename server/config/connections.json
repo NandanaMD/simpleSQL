@@ -1,15 +1,25 @@
 {
   "connections": {
-    "b9d08c0b-acac-46a8-8260-bf8cc790f115": {
-      "id": "b9d08c0b-acac-46a8-8260-bf8cc790f115",
-      "name": "Nandan",
+    "e0ba9b4f-f39a-42e0-bef2-06240f657160": {
+      "id": "e0ba9b4f-f39a-42e0-bef2-06240f657160",
+      "name": "LocalHost",
       "host": "localhost",
       "port": 5432,
-      "username": "postgres",
+      "username": "nmd",
       "password": "nandan123",
-      "defaultDatabase": "postgres",
-      "createdAt": "2026-02-24T21:32:31.381Z",
-      "updatedAt": "2026-02-24T21:32:31.381Z"
+      "defaultDatabase": "main",
+      "createdAt": "2026-02-25T19:57:00.720Z",
+      "updatedAt": "2026-02-25T19:57:00.720Z"
+    }
+  },
+  "savedQueries": {
+    "42shy_JPLxyjZkDyLxILW": {
+      "id": "42shy_JPLxyjZkDyLxILW",
+      "name": "show ",
+      "sql": "select * from",
+      "tags": [],
+      "createdAt": "2026-02-26T11:44:31.034Z",
+      "updatedAt": "2026-02-26T11:44:31.034Z"
     }
   }
 }

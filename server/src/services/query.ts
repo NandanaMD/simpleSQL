@@ -1,6 +1,7 @@
 import { QueryRequest, QueryResult, QueryField } from '@sql-ide/shared';
 import { ApiError } from '../middleware/errorHandler';
 import * as connectionService from './connections';
+import * as dbAdapter from './dbAdapter';
 import logger from '../utils/logger';
 import appConfig from '../config';
 
@@ -17,35 +18,125 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
     throw new ApiError('Query cannot be empty', 400);
   }
 
-  const pool = connectionService.createPool(connection, request.database);
-  const timeout = request.timeout || appConfig.query.timeoutMs;
+  // Handle CREATE DATABASE command specially for SQLite
+  // SQLite doesn't support CREATE DATABASE SQL - databases are just files
+  const createDbMatch = trimmedSql.match(/^\s*CREATE\s+DATABASE\s+["'`]?(\w+)["'`]?\s*;?\s*$/i);
+  if (createDbMatch) {
+    const newDbName = createDbMatch[1];
+    const startTime = Date.now();
+    
+    try {
+      // Create the database by initializing a connection to it
+      // This will create the .db file if it doesn't exist
+      const newDb = connectionService.getDatabase(connection, newDbName);
+      
+      // Just opening the connection creates the file, so we can close it
+      newDb.close();
+      
+      const executionTime = Date.now() - startTime;
+      
+      logger.info('Database created successfully', {
+        connectionId: request.connectionId,
+        database: newDbName,
+        executionTime: `${executionTime}ms`,
+      });
+      
+      return {
+        rows: [],
+        rowCount: 0,
+        fields: [],
+        executionTime,
+        command: 'CREATE',
+      };
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      
+      logger.error('Database creation failed', {
+        connectionId: request.connectionId,
+        database: newDbName,
+        error,
+        executionTime: `${executionTime}ms`,
+      });
+      
+      throw parseSQLiteError(error);
+    }
+  }
+
+  // Handle DROP DATABASE command specially for SQLite
+  const dropDbMatch = trimmedSql.match(/^\s*DROP\s+DATABASE\s+["'`]?(\w+)["'`]?\s*;?\s*$/i);
+  if (dropDbMatch) {
+    const dbName = dropDbMatch[1];
+    const startTime = Date.now();
+    
+    try {
+      // Get the database file path and delete it
+      const dbPath = dbAdapter.getDatabasePath(request.connectionId, dbName);
+      dbAdapter.deleteDatabase(dbPath);
+      
+      const executionTime = Date.now() - startTime;
+      
+      logger.info('Database dropped successfully', {
+        connectionId: request.connectionId,
+        database: dbName,
+        executionTime: `${executionTime}ms`,
+      });
+      
+      return {
+        rows: [],
+        rowCount: 0,
+        fields: [],
+        executionTime,
+        command: 'DROP',
+      };
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      
+      logger.error('Database drop failed', {
+        connectionId: request.connectionId,
+        database: dbName,
+        error,
+        executionTime: `${executionTime}ms`,
+      });
+      
+      throw parseSQLiteError(error);
+    }
+  }
+
+  const db = connectionService.getDatabase(connection, request.database);
 
   const startTime = Date.now();
-  let client;
+  
+  // Apply timeout wrapper for query execution
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Query execution timeout')), appConfig.query.timeoutMs);
+  });
 
   try {
-    client = await pool.connect();
-
-    // Set statement timeout
-    await client.query(`SET statement_timeout = ${timeout}`);
-
-    // Execute query with trimmed SQL
-    const result = await client.query(trimmedSql);
+    // Execute query with timeout and optimized limiting
+    const result = await Promise.race([
+      executeWithOptimization(db, trimmedSql),
+      timeoutPromise
+    ]);
 
     const executionTime = Date.now() - startTime;
 
-    // Map fields
-    const fields: QueryField[] = result.fields.map((field: { name: string; dataTypeID: number; tableID: number; columnID: number }) => ({
-      name: field.name,
-      dataTypeID: field.dataTypeID,
-      tableID: field.tableID,
-      columnID: field.columnID,
-      dataType: getPostgresTypeName(field.dataTypeID),
-    }));
+    // Map fields from SQLite result
+    const fields: QueryField[] = result.rows.length > 0
+      ? Object.keys(result.rows[0]).map((name, index) => {
+          const value = result.rows[0][name];
+          const dataType = inferSQLiteType(value);
 
-    // Limit rows if needed
-    const rows = result.rows.slice(0, appConfig.query.maxResultRows);
-    const rowCount = result.rowCount || 0;
+          return {
+            name,
+            dataTypeID: 0, // SQLite doesn't use OIDs
+            tableID: 0,
+            columnID: index,
+            dataType,
+          };
+        })
+      : [];
+
+    const rowCount = result.rowCount;
 
     logger.info('Query executed successfully', {
       connectionId: request.connectionId,
@@ -55,7 +146,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
     });
 
     return {
-      rows,
+      rows: result.rows,
       rowCount,
       fields,
       executionTime,
@@ -71,28 +162,17 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
       executionTime: `${executionTime}ms`,
     });
 
-    throw parsePostgresError(error);
-  } finally {
-    if (client) {
-      client.release();
-    }
+    throw parseSQLiteError(error);
   }
 }
 
-function parsePostgresError(error: unknown): ApiError {
+function parseSQLiteError(error: unknown): ApiError {
   if (error instanceof Error) {
-    const pgError = error as Error & {
+    const sqliteError = error as Error & {
       code?: string;
-      detail?: string;
-      hint?: string;
-      position?: string;
-      line?: string;
-      column?: string;
     };
 
-    const apiError = new ApiError(pgError.message, 400, pgError.code);
-    apiError.detail = pgError.detail;
-    apiError.hint = pgError.hint;
+    const apiError = new ApiError(sqliteError.message, 400, sqliteError.code);
 
     return apiError;
   }
@@ -100,30 +180,70 @@ function parsePostgresError(error: unknown): ApiError {
   return new ApiError('Unknown query execution error', 500);
 }
 
-// Map PostgreSQL OID to type name
-function getPostgresTypeName(oid: number): string {
-  const typeMap: Record<number, string> = {
-    16: 'bool',
-    17: 'bytea',
-    20: 'int8',
-    21: 'int2',
-    23: 'int4',
-    25: 'text',
-    26: 'oid',
-    700: 'float4',
-    701: 'float8',
-    1043: 'varchar',
-    1082: 'date',
-    1083: 'time',
-    1114: 'timestamp',
-    1184: 'timestamptz',
-    1186: 'interval',
-    1266: 'timetz',
-    1700: 'numeric',
-    2950: 'uuid',
-    3802: 'jsonb',
-    114: 'json',
-  };
+// Map SQLite value types to type names
+function inferSQLiteType(value: unknown): string {
+  if (value === null) return 'NULL';
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? 'INTEGER' : 'REAL';
+  }
+  if (typeof value === 'string') return 'TEXT';
+  if (typeof value === 'boolean') return 'INTEGER'; // SQLite stores booleans as 0/1
+  if (value instanceof Buffer) return 'BLOB';
 
-  return typeMap[oid] || `oid_${oid}`;
+  return 'TEXT';
+}
+
+/**
+ * Execute query with optimization for large result sets
+ * Applies LIMIT at database level for SELECT queries
+ */
+async function executeWithOptimization(
+  db: dbAdapter.DatabaseAdapter,
+  sql: string
+): Promise<{ rows: Record<string, unknown>[]; rowCount: number; command: string }> {
+  return new Promise((resolve, reject) => {
+    try {
+      const trimmed = sql.trim();
+      const upperSql = trimmed.toUpperCase();
+      
+      // Check if this is a SELECT query without LIMIT
+      const isSelect = upperSql.startsWith('SELECT');
+      const hasLimit = /\bLIMIT\s+\d+/i.test(trimmed);
+      
+      let optimizedSql = trimmed;
+      let needsCount = false;
+      
+      // For SELECT without LIMIT, add LIMIT to avoid loading massive result sets
+      if (isSelect && !hasLimit) {
+        // Add LIMIT clause for performance
+        optimizedSql = `${trimmed} LIMIT ${appConfig.query.maxResultRows}`;
+        needsCount = true;
+      }
+      
+      // Execute the query
+      const result = db.execute(optimizedSql);
+      
+      // For large queries, get actual count if needed
+      let actualRowCount = result.rowCount;
+      if (needsCount && result.rowCount === appConfig.query.maxResultRows) {
+        // Result was limited, get actual count
+        try {
+          const countSql = `SELECT COUNT(*) as total FROM (${trimmed})`;
+          const countResult = db.execute(countSql);
+          actualRowCount = (countResult.rows[0]?.total as number) || result.rowCount;
+        } catch {
+          // If count query fails, use the limited count
+          actualRowCount = result.rowCount;
+        }
+      }
+      
+      resolve({
+        rows: result.rows,
+        rowCount: actualRowCount,
+        command: result.command
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
 }

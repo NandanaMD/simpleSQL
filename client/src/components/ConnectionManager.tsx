@@ -32,9 +32,9 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
     name: '',
     host: 'localhost',
     port: 5432,
-    username: 'postgres',
+    username: '',
     password: '',
-    defaultDatabase: 'postgres',
+    defaultDatabase: 'main',
   });
 
   const handleInputChange = (field: keyof ConnectionConfig, value: string | number) => {
@@ -106,7 +106,7 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Connection Manager</DialogTitle>
-          <DialogDescription>Manage your PostgreSQL database connections</DialogDescription>
+          <DialogDescription>Manage your SQLite database connections</DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6">
@@ -184,7 +184,7 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                     id="username"
                     value={formData.username}
                     onChange={(e) => handleInputChange('username', e.target.value)}
-                    placeholder="postgres"
+                    placeholder="(optional)"
                   />
                 </div>
                 <div className="grid gap-2">
@@ -205,7 +205,7 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                   id="database"
                   value={formData.defaultDatabase}
                   onChange={(e) => handleInputChange('defaultDatabase', e.target.value)}
-                  placeholder="postgres"
+                  placeholder="main"
                 />
               </div>
             </div>

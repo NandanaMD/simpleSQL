@@ -1,17 +1,19 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useThemeStore } from '../stores/themeStore';
 import Editor, { OnMount } from '@monaco-editor/react';
-import { Play, X, Plus, Code2, AlertTriangle } from 'lucide-react';
+import { Play, X, Plus, Code2, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import * as api from '../lib/api';
 import { toast } from 'sonner';
 import type { QueryRequest } from '@sql-ide/shared';
-import { translateError, parseErrorPosition } from '../lib/errorTranslator';
+
 import { formatSQL, validateSQL } from '../lib/sqlFormatter';
 import { interpretError, clearHighlights } from '../lib/errorInterpreter';
+import { translate } from '../lib/simpleSyntaxParser';
+import { SimpleSyntaxHelpDialog } from './SimpleSyntaxHelpDialog';
 
 export function SQLEditor() {
   const {
@@ -21,24 +23,32 @@ export function SQLEditor() {
     closeTab,
     setActiveTab,
     updateTabContent,
-    addResultTab,
+    setTabResult,
+    setTabError,
+    setTabDecorations,
+    setTabMode,
+    setTabTranslatedSql,
+    clearTabResult,
     setQueryError,
     setIsExecuting,
     isExecuting,
     addToHistory,
-    clearAllResultTabs,
   } = useEditorStore();
   const { connections, selectedConnectionId, selectedDatabase } = useConnectionStore();
   const { editor: editorSettings, query: querySettings } = useSettingsStore();
   const { theme } = useThemeStore();
   const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
   const handleExecuteRef = useRef<(() => void) | null>(null);
   const handleFormatRef = useRef<(() => void) | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const currentMode = activeTab?.mode || 'sql';
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
 
     // Add keyboard shortcut for execution (Ctrl+Enter)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -49,7 +59,98 @@ export function SQLEditor() {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, () => {
       handleFormatRef.current?.();
     });
+
+    // Add keyboard shortcut for mode toggle (Ctrl+Shift+M)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => {
+      if (activeTab) {
+        const newMode = currentMode === 'sql' ? 'simple' : 'sql';
+        setTabMode(activeTab.id, newMode);
+        if (newMode === 'sql') {
+          setTabTranslatedSql(activeTab.id, undefined);
+        }
+      }
+    });
+
+    // Register autocomplete provider
+    monaco.languages.registerCompletionItemProvider('sql', {
+      provideCompletionItems: async (model: any, position: any) => {
+        // Only provide suggestions if we have a connection and database selected
+        if (!selectedConnectionId || !selectedDatabase) {
+          return { suggestions: [] };
+        }
+
+        try {
+          const suggestions = await api.getAutocompleteSuggestions(
+            selectedConnectionId,
+            selectedDatabase
+          );
+
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          const completionItems = suggestions.map((suggestion) => {
+            let kind: any;
+            switch (suggestion.kind) {
+              case 'keyword':
+                kind = monaco.languages.CompletionItemKind.Keyword;
+                break;
+              case 'table':
+                kind = monaco.languages.CompletionItemKind.Class;
+                break;
+              case 'column':
+                kind = monaco.languages.CompletionItemKind.Field;
+                break;
+              case 'function':
+                kind = monaco.languages.CompletionItemKind.Function;
+                break;
+              case 'database':
+                kind = monaco.languages.CompletionItemKind.Module;
+                break;
+              default:
+                kind = monaco.languages.CompletionItemKind.Text;
+            }
+
+            return {
+              label: suggestion.label,
+              kind,
+              detail: suggestion.detail,
+              documentation: suggestion.documentation,
+              insertText: suggestion.insertText || suggestion.label,
+              range,
+            };
+          });
+
+          return { suggestions: completionItems };
+        } catch (error) {
+          console.error('Autocomplete failed:', error);
+          return { suggestions: [] };
+        }
+      },
+    });
   };
+
+  const handleModeToggle = useCallback((mode: 'sql' | 'simple') => {
+    if (!activeTab) return;
+    
+    setTabMode(activeTab.id, mode);
+    
+    // Clear translated SQL when switching modes
+    if (mode === 'sql') {
+      setTabTranslatedSql(activeTab.id, undefined);
+    }
+    
+    // Show warning if switching to SimpleSyntax with content
+    if (mode === 'simple' && activeTab.content.trim()) {
+      toast.info("You're in SimpleSyntax mode. Editor contains SQL code. Switch back to SQL mode or clear editor.", {
+        duration: 6000,
+      });
+    }
+  }, [activeTab, setTabMode, setTabTranslatedSql]);
 
   const handleFormat = useCallback(() => {
     if (!editorRef.current || !activeTab) return;
@@ -79,28 +180,6 @@ export function SQLEditor() {
       return;
     }
 
-    // Validate query first
-    const validation = validateSQL(trimmedContent);
-    if (!validation.valid) {
-      const errorMessage = validation.errors.join(', ');
-      toast.error(errorMessage, { duration: 5000 });
-      setQueryError(errorMessage);
-      return;
-    }
-
-    // Check for destructive operations  
-    const upperSQL = trimmedContent.toUpperCase();
-    if ((upperSQL.includes('DELETE') || upperSQL.includes('DROP')) && querySettings.confirmDelete) {
-      if (!upperSQL.includes('WHERE') && !confirm('⚠️ This operation has no WHERE clause and will affect all rows. Continue?')) {
-        return;
-      }
-    }
-    
-    // Update the tab content with the current editor value to ensure sync
-    if (currentContent !== activeTab.content) {
-      updateTabContent(activeTab.id, currentContent);
-    }
-
     const connectionId = activeTab.connectionId || selectedConnectionId;
     if (!connectionId) {
       toast.error('Please select a connection first');
@@ -118,8 +197,92 @@ export function SQLEditor() {
       return;
     }
 
-    // Clear previous results on new query
-    clearAllResultTabs();
+    // Get the current mode
+    const mode = currentMode;
+    let sqlToExecute = trimmedContent;
+    
+    // If in SimpleSyntax mode, translate first
+    if (mode === 'simple') {
+      const translationResult = translate(trimmedContent);
+      
+      if (!translationResult.success) {
+        // Show SimpleSyntax parse error
+        const error = translationResult.error!;
+        setTabError(activeTab.id, `SimpleSyntax Error: ${error.message}`);
+        setQueryError(`SimpleSyntax Error: ${error.message}`);
+        
+        // Highlight the error token in the editor
+        if (editorRef.current && monacoRef.current && error.position >= 0) {
+          const model = editorRef.current.getModel();
+          if (model) {
+            const pos = model.getPositionAt(error.position);
+            const wordAtPos = model.getWordAtPosition(pos);
+            
+            const decorations = [{
+              range: new monacoRef.current.Range(
+                pos.lineNumber,
+                wordAtPos?.startColumn || pos.column,
+                pos.lineNumber,
+                wordAtPos?.endColumn || pos.column + error.token.length
+              ),
+              options: {
+                className: 'error-highlight',
+                inlineClassName: 'error-highlight-inline',
+                minimap: { color: '#ff0000', position: 2 }
+              }
+            }];
+            
+            const decorationIds = editorRef.current.deltaDecorations([], decorations);
+            setTabDecorations(activeTab.id, decorationIds);
+          }
+        }
+        
+        toast.error(`SimpleSyntax Error: ${error.message}`, {
+          duration: 8000,
+        });
+        
+        // Clear translated SQL on error
+        setTabTranslatedSql(activeTab.id, undefined);
+        
+        return; // DO NOT execute SQL
+      }
+      
+      // Translation succeeded
+      sqlToExecute = translationResult.sql!;
+      
+      // Show SQL preview
+      setTabTranslatedSql(activeTab.id, sqlToExecute);
+    }
+    
+    // Validate SQL (only for SQL mode)
+    if (mode === 'sql') {
+      const validation = validateSQL(sqlToExecute);
+      if (!validation.valid) {
+        const errorMessage = validation.errors.join(', ');
+        toast.error(errorMessage, { duration: 5000 });
+        setQueryError(errorMessage);
+        setTabError(activeTab.id, errorMessage);
+        return;
+      }
+    }
+
+    // Check for destructive operations (only in SQL mode)
+    if (mode === 'sql') {
+      const upperSQL = sqlToExecute.toUpperCase();
+      if ((upperSQL.includes('DELETE') || upperSQL.includes('DROP')) && querySettings.confirmDelete) {
+        if (!upperSQL.includes('WHERE') && !confirm('⚠️ This operation has no WHERE clause and will affect all rows. Continue?')) {
+          return;
+        }
+      }
+    }
+    
+    // Update the tab content with the current editor value to ensure sync
+    if (currentContent !== activeTab.content) {
+      updateTabContent(activeTab.id, currentContent);
+    }
+
+    // Clear previous results for this tab
+    clearTabResult(activeTab.id);
     setIsExecuting(true);
     setQueryError(null);
     const startTime = Date.now();
@@ -127,31 +290,37 @@ export function SQLEditor() {
     try {
       const request: QueryRequest = {
         connectionId,
-        sql: trimmedContent,
+        sql: sqlToExecute,
         database: selectedDatabase,
         timeout: querySettings.timeout,
       };
 
       const result = await api.executeQuery(request);
-      addResultTab(result);
+      
+      // Store result in the active tab
+      setTabResult(activeTab.id, result);
 
       const executionTime = Date.now() - startTime;
 
       // Clear any error highlights on successful execution
       if (editorRef.current) {
         clearHighlights(editorRef.current);
+        setTabDecorations(activeTab.id, []);
       }
 
-      // Add to history
+      // Add to history with mode information
       addToHistory({
         id: `${Date.now()}`,
-        sql: trimmedContent,
+        sql: sqlToExecute,
         connectionId,
         database: selectedDatabase,
         executedAt: new Date().toISOString(),
         executionTime,
         rowCount: result.rowCount,
         success: true,
+        mode,
+        input: mode === 'simple' ? trimmedContent : undefined,
+        translatedSql: mode === 'simple' ? sqlToExecute : undefined,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Query execution failed';
@@ -159,33 +328,37 @@ export function SQLEditor() {
       // Use rule-based error interpreter
       const interpreted = interpretError(
         errorMessage,
-        trimmedContent,
+        sqlToExecute,
         editorRef.current
       );
       
-      // Set error for display in results panel
+      // Store error in the tab
+      setTabError(activeTab.id, errorMessage);
       setQueryError(errorMessage);
       
       // Show user-friendly interpretation
       toast.error(interpreted.naturalMessage, {
         duration: 8000,
-        description: interpreted.suggestion,
+        description: interpreted.suggestion + (mode === 'simple' ? `\n\nGenerated SQL: ${sqlToExecute}` : ''),
       });
 
       addToHistory({
         id: `${Date.now()}`,
-        sql: trimmedContent,
+        sql: sqlToExecute,
         connectionId,
         database: selectedDatabase,
         executedAt: new Date().toISOString(),
         executionTime: Date.now() - startTime,
         rowCount: 0,
         success: false,
+        mode,
+        input: mode === 'simple' ? trimmedContent : undefined,
+        translatedSql: mode === 'simple' ? sqlToExecute : undefined,
       });
     } finally {
       setIsExecuting(false);
     }
-  }, [activeTab, selectedConnectionId, selectedDatabase, connections, querySettings, updateTabContent, addResultTab, setQueryError, setIsExecuting, addToHistory, clearAllResultTabs]);
+  }, [activeTab, selectedConnectionId, selectedDatabase, connections, querySettings, currentMode, updateTabContent, setTabResult, setTabError, setTabDecorations, setTabTranslatedSql, clearTabResult, setQueryError, setIsExecuting, addToHistory]);
 
   // Keep the refs updated with the latest handlers
   useEffect(() => {
@@ -196,6 +369,27 @@ export function SQLEditor() {
     handleFormatRef.current = handleFormat;
   }, [handleFormat]);
 
+  // Restore decorations when switching tabs
+  useEffect(() => {
+    if (!editorRef.current || !activeTab) return;
+
+    // Clear all decorations first
+    clearHighlights(editorRef.current);
+
+    // Restore tab-specific decorations if they exist
+    if (activeTab.decorations && activeTab.decorations.length > 0) {
+      // Decorations need to be re-applied as Monaco doesn't preserve them across content changes
+      // We need to reinterpret the error to get the decoration objects
+      if (activeTab.errorInfo) {
+        interpretError(
+          activeTab.errorInfo,
+          activeTab.content,
+          editorRef.current
+        );
+      }
+    }
+  }, [activeTabId, activeTab]);
+
   return (
     <div className="h-full flex flex-col">
       {/* Tabs Bar */}
@@ -205,7 +399,9 @@ export function SQLEditor() {
             <div
               key={tab.id}
               className={`flex items-center gap-2 px-3 py-2 border-r border-border cursor-pointer transition-colors ${
-                tab.id === activeTabId ? 'bg-background' : 'hover:bg-accent'
+                tab.id === activeTabId 
+                  ? 'bg-background border-b-2 border-b-primary font-semibold' 
+                  : 'hover:bg-accent'
               }`}
               onClick={() => setActiveTab(tab.id)}
             >
@@ -230,22 +426,66 @@ export function SQLEditor() {
 
       {/* Toolbar */}
       <div className="h-10 border-b border-border flex items-center gap-2 px-2 bg-card">
+        {/* Mode Toggle */}
+        <div className="flex items-center border border-border rounded-md overflow-hidden">
+          <button
+            className={`px-3 py-1 text-sm transition-colors ${
+              currentMode === 'sql'
+                ? 'bg-[#0078d4] text-white font-semibold'
+                : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
+            }`}
+            onClick={() => handleModeToggle('sql')}
+            title="SQL Mode"
+          >
+            SQL
+          </button>
+          <button
+            className={`px-3 py-1 text-sm transition-colors ${
+              currentMode === 'simple'
+                ? 'bg-[#0078d4] text-white font-semibold'
+                : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
+            }`}
+            onClick={() => handleModeToggle('simple')}
+            title="SimpleSyntax Mode (Ctrl+Shift+M)"
+          >
+            SimpleSyntax
+          </button>
+        </div>
+
         <Button size="sm" onClick={handleExecute} disabled={isExecuting}>
           <Play className="h-4 w-4 mr-2" />
           Execute
         </Button>
-        <Button size="sm" variant="outline" onClick={handleFormat} disabled={isExecuting} title="Format SQL (Ctrl+Shift+F)">
+        <Button size="sm" variant="outline" onClick={handleFormat} disabled={isExecuting || currentMode === 'simple'} title="Format SQL (Ctrl+Shift+F)">
           <Code2 className="h-4 w-4 mr-2" />
           Format
         </Button>
 
+        {/* Mode Label */}
+        <span className="text-xs font-mono text-gray-500 ml-2">
+          Mode: {currentMode === 'sql' ? 'SQL' : 'SimpleSyntax'}
+        </span>
+
+        {/* Help Icon for SimpleSyntax */}
+        {currentMode === 'simple' && (
+          <Button 
+            size="sm" 
+            variant="ghost" 
+            className="h-7 w-7 p-0" 
+            title="SimpleSyntax Help"
+            onClick={() => setShowHelp(true)}
+          >
+            <HelpCircle className="h-4 w-4" />
+          </Button>
+        )}
+
         {selectedConnectionId && selectedDatabase && (
-          <span className="text-xs text-muted-foreground ml-2">
+          <span className="text-xs text-muted-foreground ml-auto">
             {connections.find((c) => c.id === selectedConnectionId)?.name} / {selectedDatabase}
           </span>
         )}
         {selectedConnectionId && !selectedDatabase && (
-          <span className="text-xs text-yellow-600 flex items-center gap-1">
+          <span className="text-xs text-yellow-600 flex items-center gap-1 ml-auto">
             <AlertTriangle className="h-3 w-3" />
             Select a database to run queries
           </span>
@@ -253,35 +493,70 @@ export function SQLEditor() {
       </div>
 
       {/* Editor */}
-      <div className="flex-1">
-        {activeTab ? (
-          <Editor
-            height="100%"
-            defaultLanguage="sql"
-            value={activeTab.content}
-            onChange={(value) => updateTabContent(activeTab.id, value || '')}
-            onMount={handleEditorDidMount}
-            theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-            options={{
-              minimap: { enabled: editorSettings.minimap },
-              fontSize: editorSettings.fontSize,
-              tabSize: editorSettings.tabSize,
-              fontFamily: editorSettings.fontFamily,
-              lineNumbers: editorSettings.lineNumbers ? 'on' : 'off',
-              wordWrap: editorSettings.wordWrap ? 'on' : 'off',
-              renderWhitespace: 'selection',
-              automaticLayout: true,
-              scrollBeyondLastLine: false,
-              suggestOnTriggerCharacters: true,
-              quickSuggestions: true,
-            }}
-          />
-        ) : (
-          <div className="h-full flex items-center justify-center text-muted-foreground">
-            No active editor tab
+      <div className="flex-1 flex flex-col">
+        <div className="flex-1">
+          {activeTab ? (
+            <Editor
+              height="100%"
+              defaultLanguage="sql"
+              value={activeTab.content}
+              onChange={(value) => {
+                updateTabContent(activeTab.id, value || '');
+                // Clear translated SQL on content change in SimpleSyntax mode
+                if (currentMode === 'simple' && activeTab.translatedSql) {
+                  setTabTranslatedSql(activeTab.id, undefined);
+                }
+              }}
+              onMount={handleEditorDidMount}
+              theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+              options={{
+                minimap: { enabled: editorSettings.minimap },
+                fontSize: editorSettings.fontSize,
+                tabSize: editorSettings.tabSize,
+                fontFamily: editorSettings.fontFamily,
+                fontWeight: '600',
+                fontLigatures: true,
+                lineNumbers: editorSettings.lineNumbers ? 'on' : 'off',
+                wordWrap: editorSettings.wordWrap ? 'on' : 'off',
+                renderWhitespace: 'selection',
+                automaticLayout: true,
+                scrollBeyondLastLine: false,
+                suggestOnTriggerCharacters: true,
+                quickSuggestions: true,
+              }}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              No active editor tab
+            </div>
+          )}
+        </div>
+
+        {/* SQL Preview Status Bar - Only in SimpleSyntax mode with translated SQL */}
+        {currentMode === 'simple' && activeTab?.translatedSql && (
+          <div className="h-8 border-t border-border bg-[#f5f5f5] px-3 flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2 flex-1 overflow-hidden">
+              <span className="text-gray-500">Translated SQL:</span>
+              <span className="text-black truncate" title={activeTab.translatedSql}>
+                {activeTab.translatedSql}
+              </span>
+            </div>
+            <button
+              className="ml-2 px-2 py-1 text-gray-600 hover:text-black hover:bg-gray-200 rounded"
+              onClick={() => {
+                navigator.clipboard.writeText(activeTab.translatedSql || '');
+                toast.success('SQL copied to clipboard');
+              }}
+              title="Copy SQL"
+            >
+              Copy
+            </button>
           </div>
         )}
       </div>
+
+      {/* SimpleSyntax Help Dialog */}
+      <SimpleSyntaxHelpDialog open={showHelp} onOpenChange={setShowHelp} />
     </div>
   );
 }

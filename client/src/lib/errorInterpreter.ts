@@ -110,6 +110,150 @@ export function clearHighlights(editorInstance: any): void {
 
 const errorRules: ErrorRule[] = [
   // -------------------------------------
+  // SQLITE-SPECIFIC ERRORS
+  // -------------------------------------
+  {
+    name: 'sqlite_no_such_table',
+    test: (msg) => /no such table/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/no such table:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Table '${token}' does not exist. Make sure the table is created in the current database.`
+        : 'Table not found. Verify the table name and ensure it exists.',
+    suggestion: () => 'Check available tables in the database explorer or create the table first.',
+  },
+
+  {
+    name: 'sqlite_no_such_column',
+    test: (msg) => /no such column/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/no such column:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Column '${token}' does not exist. Check the column name or table structure.`
+        : 'Column not found. Verify the column name is spelled correctly.',
+    suggestion: () => 'Use the database explorer to view available columns in the table.',
+  },
+
+  {
+    name: 'sqlite_unique_constraint',
+    test: (msg) => /UNIQUE constraint failed/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/UNIQUE constraint failed:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Duplicate value violates UNIQUE constraint on '${token}'. This value must be unique.`
+        : 'UNIQUE constraint violation. The value already exists in the table.',
+    suggestion: () => 'Use a different value or update the existing record instead.',
+  },
+
+  {
+    name: 'sqlite_not_null_constraint',
+    test: (msg) => /NOT NULL constraint failed/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/NOT NULL constraint failed:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Column '${token}' cannot be NULL. A value is required.`
+        : 'NOT NULL constraint violation. This column requires a value.',
+    suggestion: () => 'Provide a valid value for this column or set a DEFAULT value in the schema.',
+  },
+
+  {
+    name: 'sqlite_foreign_key_constraint',
+    test: (msg) => /FOREIGN KEY constraint failed/i.test(msg),
+    extract: () => 'foreign key',
+    explain: () => 'Foreign key constraint violation. The referenced record does not exist.',
+    suggestion: () =>
+      'Ensure the referenced record exists in the parent table before inserting or updating.',
+  },
+
+  {
+    name: 'sqlite_datatype_mismatch',
+    test: (msg) => /datatype mismatch/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/column\s+(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Data type mismatch for column '${token}'. The value type does not match the column type.`
+        : 'Data type mismatch. The value does not match the expected column type.',
+    suggestion: () =>
+      'Ensure INTEGER columns receive numbers, TEXT columns receive strings, etc.',
+  },
+
+  {
+    name: 'sqlite_syntax_error',
+    test: (msg) => /syntax error/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/near\s+"([^"]+)"|near\s+(\S+)/i);
+      return match ? match[1] || match[2] : null;
+    },
+    explain: (token) =>
+      token
+        ? `SQL syntax error near '${token}'. Check the query structure.`
+        : 'SQL syntax error. Review your query structure and keyword spelling.',
+    suggestion: () =>
+      'Verify SQL keywords are spelled correctly and check for missing commas or parentheses.',
+  },
+
+  {
+    name: 'sqlite_ambiguous_column',
+    test: (msg) => /ambiguous column name/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/ambiguous column name:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Column '${token}' is ambiguous. Multiple tables have this column.`
+        : 'Ambiguous column reference. Specify which table the column belongs to.',
+    suggestion: (token) =>
+      token
+        ? `Prefix the column with a table name or alias: 'tablename.${token}'`
+        : 'Use table.column syntax to clarify which table the column belongs to.',
+  },
+
+  {
+    name: 'sqlite_constraint_failed',
+    test: (msg) => /constraint failed/i.test(msg) && !/UNIQUE|NOT NULL|FOREIGN KEY/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/constraint failed:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Constraint '${token}' failed. The operation violates a table constraint.`
+        : 'A table constraint was violated. Check your data against table constraints.',
+    suggestion: () => 'Review the table schema and ensure data meets all constraints.',
+  },
+
+  {
+    name: 'sqlite_no_such_function',
+    test: (msg) => /no such function/i.test(msg),
+    extract: (msg) => {
+      const match = msg.match(/no such function:\s*(\S+)/i);
+      return match ? match[1] : null;
+    },
+    explain: (token) =>
+      token
+        ? `Function '${token}' is not recognized by SQLite.`
+        : 'Unknown SQL function. Verify the function name.',
+    suggestion: () =>
+      'Check SQLite documentation for available functions or check function spelling.',
+  },
+
+  // -------------------------------------
   // SYNTAX ERRORS
   // -------------------------------------
   {

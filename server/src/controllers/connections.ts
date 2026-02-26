@@ -83,7 +83,7 @@ export const testConnection = asyncHandler(async (req: Request, res: Response) =
     return;
   }
 
-  const result = await connectionService.testConnection(config);
+  const result = connectionService.testConnection(config);
 
   res.json({
     success: result.success,

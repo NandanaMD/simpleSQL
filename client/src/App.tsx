@@ -10,22 +10,32 @@ import { ResultsPanel } from './components/ResultsPanel';
 import { ImportWizard } from './components/ImportWizard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HelpPanel } from './components/HelpPanel';
+import { SavedQueriesDialog } from './components/SavedQueriesDialog';
+import { IntroducingSimpleSyntaxDialog } from './components/IntroducingSimpleSyntaxDialog';
 import { Toaster } from 'sonner';
-import { Plus, FileUp, Sun, Moon, Settings, HelpCircle } from 'lucide-react';
+import { Plus, FileUp, Sun, Moon, Settings, HelpCircle, BookOpen, Sparkles } from 'lucide-react';
 import { Button } from './components/ui/button';
 
 function App() {
   const [showConnectionManager, setShowConnectionManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSavedQueries, setShowSavedQueries] = useState(false);
+  const [showIntroSimpleSyntax, setShowIntroSimpleSyntax] = useState(false);
   const [editorHeight, setEditorHeight] = useState(50); // percentage
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const { fetchConnections } = useConnectionStore();
-  const { tabs, createTab } = useEditorStore();
+  const { tabs, createTab, activeTabId, setTabMode } = useEditorStore();
   const { openWizard } = useImportStore();
   const { theme, toggleTheme, setTheme } = useThemeStore();
+
+  const handleTrySimpleSyntax = () => {
+    if (activeTabId) {
+      setTabMode(activeTabId, 'simple');
+    }
+  };
 
   useEffect(() => {
     fetchConnections();
@@ -79,6 +89,19 @@ function App() {
       <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card">
         <h1 className="text-xl font-semibold">SimpleSQL</h1>
         <div className="flex items-center gap-2">
+          <Button 
+            size="sm" 
+            variant="default"
+            className="bg-[#0078d4] hover:bg-[#106ebe] text-white"
+            onClick={() => setShowIntroSimpleSyntax(true)} 
+            title="Introducing SimpleSyntax"
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            Introducing SimpleSyntax
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowSavedQueries(true)} title="Saved Queries">
+            <BookOpen className="h-4 w-4" />
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} title="Help">
             <HelpCircle className="h-4 w-4" />
           </Button>
@@ -138,6 +161,16 @@ function App() {
 
       {/* Help Panel */}
       <HelpPanel open={showHelp} onOpenChange={setShowHelp} />
+
+      {/* Saved Queries */}
+      <SavedQueriesDialog open={showSavedQueries} onOpenChange={setShowSavedQueries} />
+
+      {/* Introducing SimpleSyntax */}
+      <IntroducingSimpleSyntaxDialog 
+        open={showIntroSimpleSyntax} 
+        onOpenChange={setShowIntroSimpleSyntax}
+        onTryNow={handleTrySimpleSyntax}
+      />
 
       {/* Toast Notifications */}
       <Toaster position="bottom-right" />

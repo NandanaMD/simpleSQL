@@ -121,7 +121,7 @@ export interface TableStructure {
 export interface CSVImportRequest {
   connectionId: string;
   database: string;
-  schema: string;
+  schema?: string; // Optional for SQLite compatibility
   tableName: string;
   createTable: boolean;
   columnMappings: ColumnMapping[];
@@ -222,8 +222,19 @@ export interface EditorTab {
   title: string;
   content: string;
   isDirty: boolean;
+  mode?: 'sql' | 'simple'; // Editor mode (default: 'sql')
+  translatedSql?: string; // For SimpleSyntax mode - generated SQL
   connectionId?: string;
   database?: string;
+  // Per-tab result state
+  resultRows?: any[];
+  resultColumns?: any[];
+  resultCommand?: string;
+  resultRowCount?: number;
+  executionTime?: number;
+  executionTimestamp?: Date;
+  errorInfo?: string | null;
+  decorations?: string[]; // Monaco decoration IDs
 }
 
 export interface QueryHistory {
@@ -235,4 +246,9 @@ export interface QueryHistory {
   executionTime: number;
   rowCount: number;
   success: boolean;
+  mode?: 'sql' | 'simple'; // Editor mode used
+  input?: string; // Original SimpleSyntax input (if mode=simple)
+  translatedSql?: string; // Generated SQL (if mode=simple)
 }
+
+export type EditorMode = 'sql' | 'simple';

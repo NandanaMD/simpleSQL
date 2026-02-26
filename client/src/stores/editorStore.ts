@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import type { EditorTab, QueryResult, QueryHistory } from '@sql-ide/shared';
 
 // Simple nanoid implementation
@@ -6,18 +6,95 @@ function nanoid() {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-interface ResultTab {
-  id: string;
-  label: string;
-  result: QueryResult;
-  timestamp: Date;
+// Storage helper functions - must be declared before store creation
+function loadHistoryFromStorage(): QueryHistory[] {
+  try {
+    const stored = localStorage.getItem('sqlide-query-history');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistoryToStorage(history: QueryHistory[]): void {
+  try {
+    localStorage.setItem('sqlide-query-history', JSON.stringify(history));
+  } catch (error) {
+    console.error('Failed to save query history', error);
+  }
+}
+
+// Tab persistence functions
+function loadTabsFromStorage(): EditorTab[] {
+  try {
+    const stored = localStorage.getItem('sqlide-editor-tabs');
+    if (!stored) return [];
+    
+    const tabs = JSON.parse(stored);
+    // Restore tabs but clear runtime-only data (results, decorations)
+    return tabs.map((tab: EditorTab) => ({
+      ...tab,
+      mode: tab.mode || 'sql', // Default to SQL mode if not set
+      resultRows: undefined,
+      resultColumns: undefined,
+      resultCommand: undefined,
+      resultRowCount: undefined,
+      executionTime: undefined,
+      executionTimestamp: undefined,
+      errorInfo: null,
+      decorations: undefined,
+      translatedSql: undefined, // Don't restore ephemeral translated SQL
+      isDirty: false, // Reset dirty flag on reload
+    }));
+  } catch (error) {
+    console.error('Failed to load editor tabs', error);
+    return [];
+  }
+}
+
+function loadActiveTabIdFromStorage(): string | null {
+  try {
+    const stored = localStorage.getItem('sqlide-active-tab-id');
+    return stored || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTabsToStorage(tabs: EditorTab[], activeTabId: string | null): void {
+  try {
+    // Only persist essential tab data (not large result sets)
+    const tabsToSave = tabs.map((tab) => ({
+      id: tab.id,
+      title: tab.title,
+      content: tab.content,
+      isDirty: tab.isDirty,
+      mode: tab.mode || 'sql',
+      connectionId: tab.connectionId,
+      database: tab.database,
+      // Don't save: resultRows, resultColumns, decorations, translatedSql (too large / not serializable / ephemeral)
+    }));
+    
+    localStorage.setItem('sqlide-editor-tabs', JSON.stringify(tabsToSave));
+    if (activeTabId) {
+      saveActiveTabIdToStorage(activeTabId);
+    }
+  } catch (error){
+    console.error('Failed to save editor tabs', error);
+  }
+}
+
+function saveActiveTabIdToStorage(tabId: string): void {
+  try {
+    localStorage.setItem('sqlide-active-tab-id', tabId);
+  } catch (error) {
+    console.error('Failed to save active tab ID', error);
+  }
 }
 
 interface EditorStore {
   tabs: EditorTab[];
   activeTabId: string | null;
-  resultTabs: ResultTab[];
-  activeResultTabId: string | null;
   queryError: string | null;
   isExecuting: boolean;
   queryHistory: QueryHistory[];
@@ -28,10 +105,12 @@ interface EditorStore {
   updateTabContent: (id: string, content: string) => void;
   updateTabTitle: (id: string, title: string) => void;
   setTabConnection: (id: string, connectionId: string, database: string) => void;
-  addResultTab: (result: QueryResult) => void;
-  closeResultTab: (id: string) => void;
-  setActiveResultTab: (id: string) => void;
-  clearAllResultTabs: () => void;
+  setTabMode: (id: string, mode: 'sql' | 'simple') => void;
+  setTabTranslatedSql: (id: string, translatedSql: string | undefined) => void;
+  setTabResult: (id: string, result: QueryResult) => void;
+  setTabError: (id: string, error: string | null) => void;
+  setTabDecorations: (id: string, decorations: string[]) => void;
+  clearTabResult: (id: string) => void;
   setQueryError: (error: string | null) => void;
   setIsExecuting: (isExecuting: boolean) => void;
   addToHistory: (history: QueryHistory) => void;
@@ -39,10 +118,8 @@ interface EditorStore {
 }
 
 export const useEditorStore = create<EditorStore>()((set, get) => ({
-  tabs: [],
-  activeTabId: null,
-  resultTabs: [],
-  activeResultTabId: null,
+  tabs: loadTabsFromStorage(),
+  activeTabId: loadActiveTabIdFromStorage(),
   queryError: null,
   isExecuting: false,
   queryHistory: loadHistoryFromStorage(),
@@ -54,14 +131,19 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
       title: `Query ${get().tabs.length + 1}`,
       content: '',
       isDirty: false,
+      mode: 'sql', // Default mode
       connectionId,
       database,
     };
 
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: id,
-    }));
+    set((state) => {
+      const newState = {
+        tabs: [...state.tabs, newTab],
+        activeTabId: id,
+      };
+      saveTabsToStorage(newState.tabs, id);
+      return newState;
+    });
 
     return id;
   },
@@ -79,6 +161,7 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
         newActiveTabId = null;
       }
 
+      saveTabsToStorage(remainingTabs, newActiveTabId);
       return {
         tabs: remainingTabs,
         activeTabId: newActiveTabId,
@@ -88,73 +171,125 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
 
   setActiveTab: (id: string) => {
     set({ activeTabId: id });
+    saveActiveTabIdToStorage(id);
   },
 
   updateTabContent: (id: string, content: string) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
+    set((state) => {
+      const newTabs = state.tabs.map((tab) =>
         tab.id === id ? { ...tab, content, isDirty: true } : tab
-      ),
-    }));
+      );
+      saveTabsToStorage(newTabs, state.activeTabId);
+      return { tabs: newTabs };
+    });
   },
 
   updateTabTitle: (id: string, title: string) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, title } : tab)),
-    }));
+    set((state) => {
+      const newTabs = state.tabs.map((tab) => (tab.id === id ? { ...tab, title } : tab));
+      saveTabsToStorage(newTabs, state.activeTabId);
+      return { tabs: newTabs };
+    });
   },
 
   setTabConnection: (id: string, connectionId: string, database: string) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === id ? { ...tab, connectionId, database } : tab
-      ),
-    }));
-  },
-
-  addResultTab: (result: QueryResult) => {
-    const id = nanoid();
-    const resultTabCount = get().resultTabs.length;
-    const newResultTab: ResultTab = {
-      id,
-      label: `Result ${resultTabCount + 1}`,
-      result,
-      timestamp: new Date(),
-    };
-
-    set((state) => ({
-      resultTabs: [...state.resultTabs, newResultTab],
-      activeResultTabId: id,
-      queryError: null,
-    }));
-  },
-
-  closeResultTab: (id: string) => {
     set((state) => {
-      const remainingTabs = state.resultTabs.filter((tab) => tab.id !== id);
-      let newActiveId = state.activeResultTabId;
+      const newTabs = state.tabs.map((tab) =>
+        tab.id === id ? { ...tab, connectionId, database } : tab
+      );
+      saveTabsToStorage(newTabs, state.activeTabId);
+      return { tabs: newTabs };
+    });
+  },
 
-      if (state.activeResultTabId === id && remainingTabs.length > 0) {
-        const closedIndex = state.resultTabs.findIndex((tab) => tab.id === id);
-        const newIndex = Math.min(closedIndex, remainingTabs.length - 1);
-        newActiveId = remainingTabs[newIndex].id;
-      } else if (remainingTabs.length === 0) {
-        newActiveId = null;
-      }
+  setTabMode: (id: string, mode: 'sql' | 'simple') => {
+    set((state) => {
+      const newTabs = state.tabs.map((tab) =>
+        tab.id === id ? { ...tab, mode, translatedSql: undefined } : tab
+      );
+      saveTabsToStorage(newTabs, state.activeTabId);
+      return { tabs: newTabs };
+    });
+  },
 
+  setTabTranslatedSql: (id: string, translatedSql: string | undefined) => {
+    set((state) => {
+      const newTabs = state.tabs.map((tab) =>
+        tab.id === id ? { ...tab, translatedSql } : tab
+      );
+      // Don't persist translatedSql to localStorage - it's ephemeral
+      return { tabs: newTabs };
+    });
+  },
+
+  setTabResult: (id: string, result: QueryResult) => {
+    set((state) => {
+      const newTabs = state.tabs.map((tab) =>
+        tab.id === id
+          ? {
+              ...tab,
+              resultRows: result.rows,
+              resultColumns: result.fields,
+              resultCommand: result.command,
+              resultRowCount: result.rowCount,
+              executionTime: result.executionTime,
+              executionTimestamp: new Date(),
+              errorInfo: null,
+            }
+          : tab
+      );
+      // Don't persist large result sets to localStorage - only persist query content
+      saveTabsToStorage(newTabs, state.activeTabId);
       return {
-        resultTabs: remainingTabs,
-        activeResultTabId: newActiveId,
+        tabs: newTabs,
+        queryError: null,
       };
     });
   },
 
-  setActiveResultTab: (id: string) => {
-    set({ activeResultTabId: id });
+  setTabError: (id: string, error: string | null) => {
+    set((state) => {
+      const newTabs = state.tabs.map((tab) =>
+        tab.id === id
+          ? {
+              ...tab,
+              errorInfo: error,
+              resultRows: undefined,
+              resultColumns: undefined,
+            }
+          : tab
+      );
+      saveTabsToStorage(newTabs, state.activeTabId);
+      return { tabs: newTabs };
+    });
   },
 
-  clearAllResultTabs: () => {
-    set({ resultTabs: [], activeResultTabId: null });
+  setTabDecorations: (id: string, decorations: string[]) => {
+    set((state) => ({
+      tabs: state.tabs.map((tab) =>
+        tab.id === id ? { ...tab, decorations } : tab
+      ),
+    }));
+  },
+
+  clearTabResult: (id: string) => {
+    set((state) => ({
+      tabs: state.tabs.map((tab) =>
+        tab.id === id
+          ? {
+              ...tab,
+              resultRows: undefined,
+              resultColumns: undefined,
+              resultCommand: undefined,
+              resultRowCount: undefined,
+              executionTime: undefined,
+              executionTimestamp: undefined,
+              errorInfo: null,
+              decorations: undefined,
+            }
+          : tab
+      ),
+    }));
   },
 
   setQueryError: (error: string | null) => {
@@ -178,20 +313,3 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
     localStorage.removeItem('sqlide-query-history');
   },
 }));
-
-function loadHistoryFromStorage(): QueryHistory[] {
-  try {
-    const stored = localStorage.getItem('sqlide-query-history');
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistoryToStorage(history: QueryHistory[]): void {
-  try {
-    localStorage.setItem('sqlide-query-history', JSON.stringify(history));
-  } catch (error) {
-    console.error('Failed to save query history', error);
-  }
-}

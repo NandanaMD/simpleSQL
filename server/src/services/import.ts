@@ -40,7 +40,7 @@ export async function previewCSV(buffer: Buffer, filename: string): Promise<CSVP
         
         // Initialize inferredTypes for each header
         headers.forEach((header) => {
-          inferredTypes[header] = 'text';
+          inferredTypes[header] = 'TEXT';
         });
         
         logger.info('CSV headers detected from first row', { 
@@ -59,8 +59,8 @@ export async function previewCSV(buffer: Buffer, filename: string): Promise<CSVP
           rowObj[header] = value;
           
           // Infer types from actual data
-          if (value && inferredTypes[header] === 'text') {
-            inferredTypes[header] = inferType(value);
+          if (value && inferredTypes[header] === 'TEXT') {
+            inferredTypes[header] = inferSQLiteType(value);
           }
         });
         
@@ -113,171 +113,227 @@ export async function previewCSV(buffer: Buffer, filename: string): Promise<CSVP
   });
 }
 
-export async function importCSV(
+export function importCSV(
   buffer: Buffer,
   filename: string,
   request: CSVImportRequest
-): Promise<CSVImportResult> {
+): CSVImportResult {
   const connection = connectionService.getConnectionById(request.connectionId);
 
   if (!connection) {
     throw new ApiError(`Connection with id "${request.connectionId}" not found`, 404);
   }
 
-  const pool = connectionService.createPool(connection, request.database);
-  let client;
-  
-  try {
-    client = await pool.connect();
-  } catch (error) {
-    logger.error('Failed to connect to database for import', { error });
-    throw new ApiError(
-      `Failed to connect to database: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      500
-    );
-  }
+  const db = connectionService.getDatabase(connection, request.database);
 
   const startTime = Date.now();
-  const errors: CSVImportError[] = [];
 
   try {
-    await client.query('BEGIN');
+    // Use transaction for atomic import
+    const result = db.transaction(() => {
+      // Create table if needed
+      if (request.createTable) {
+        const columns = request.columnMappings
+          .map((col) => {
+            const sqliteType = mapToSQLiteType(col.dataType);
+            const nullable = col.nullable ? '' : 'NOT NULL';
+            return `"${col.tableColumn}" ${sqliteType} ${nullable}`;
+          })
+          .join(', ');
 
-    // Create table if needed
-    if (request.createTable) {
-      const columns = request.columnMappings
-        .map((col) => `"${col.tableColumn}" ${col.dataType} ${col.nullable ? '' : 'NOT NULL'}`)
-        .join(', ');
+        const createTableSQL = `CREATE TABLE IF NOT EXISTS "${request.tableName}" (${columns})`;
 
-      const createTableSQL = `
-        CREATE TABLE IF NOT EXISTS "${request.schema}"."${request.tableName}" (${columns})
-      `;
+        db.execute(createTableSQL);
+        logger.info('Created table for CSV import', {
+          table: request.tableName,
+        });
+      }
 
-      await client.query(createTableSQL);
-      logger.info('Created table for CSV import', {
-        schema: request.schema,
-        table: request.tableName,
+      // Validate table exists
+      const tableCheck = db.execute(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name=?
+      `, [request.tableName]);
+
+      if (tableCheck.rows.length === 0) {
+        throw new Error(`Table "${request.tableName}" does not exist`);
+      }
+
+      // Parse and validate all rows first
+      const allRows: Record<string, string>[] = [];
+      const parseErrors: CSVImportError[] = [];
+
+      // Synchronous CSV parsing
+      const csvContent = buffer.toString('utf-8');
+      const lines = csvContent.split(/\r?\n/);
+      
+      if (lines.length === 0) {
+        throw new Error('CSV file is empty');
+      }
+
+      // Parse header
+      const headerLine = lines[0];
+      const headers: string[] = [];
+      let inQuote = false;
+      let currentField = '';
+
+      for (let i = 0; i < headerLine.length; i++) {
+        const char = headerLine[i];
+        
+        if (char === '"') {
+          inQuote = !inQuote;
+        } else if (char === ',' && !inQuote) {
+          headers.push(currentField.trim());
+          currentField = '';
+        } else {
+          currentField += char;
+        }
+      }
+      headers.push(currentField.trim());
+
+      // Validate headers match mappings
+      for (const mapping of request.columnMappings) {
+        if (!headers.includes(mapping.csvColumn)) {
+          throw new Error(`CSV column "${mapping.csvColumn}" not found in file`);
+        }
+      }
+
+      // Parse data rows
+      for (let rowIndex = 1; rowIndex < lines.length; rowIndex++) {
+        const line = lines[rowIndex].trim();
+        if (!line) continue;
+
+        const values: string[] = [];
+        inQuote = false;
+        currentField = '';
+
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          
+          if (char === '"') {
+            inQuote = !inQuote;
+          } else if (char === ',' && !inQuote) {
+            values.push(currentField.trim());
+            currentField = '';
+          } else {
+            currentField += char;
+          }
+        }
+        values.push(currentField.trim());
+
+        // Build row object
+        const rowObj: Record<string, string> = {};
+        headers.forEach((header, idx) => {
+          rowObj[header] = values[idx] || '';
+        });
+
+        allRows.push(rowObj);
+      }
+
+      logger.info('Parsed CSV data', {
+        filename,
+        headerCount: headers.length,
+        rowCount: allRows.length,
       });
-    }
 
-    // Prepare insert statement
-    const columnNames = request.columnMappings.map((col) => `"${col.tableColumn}"`).join(', ');
-    const placeholders = request.columnMappings
-      .map((_, idx) => `$${idx + 1}`)
-      .join(', ');
-    const insertSQL = `
-      INSERT INTO "${request.schema}"."${request.tableName}" (${columnNames})
-      VALUES (${placeholders})
-    `;
+      // Validate all rows before inserting
+      const validatedRows: unknown[][] = [];
 
-    // Parse and insert CSV data
-    let rowsInserted = 0;
-    let currentRow = 0;
-    let batch: unknown[][] = [];
-
-    // Create stream from buffer
-    const fileStream = Readable.from(buffer);
-
-    await new Promise<void>((resolve, reject) => {
-      const parser = parse({
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-        relax_column_count: true,
-        bom: true, // Handle byte order mark
-        cast: false, // Keep all values as strings
-      });
-
-      parser.on('data', (row: Record<string, string>) => {
-        currentRow++;
+      for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i];
+        const rowNumber = i + 2; // +2 because of header and 1-indexed
 
         try {
           const values = request.columnMappings.map((col) => {
             const value = row[col.csvColumn];
-            return convertValue(value, col.dataType);
+            return convertAndValidateValue(value, col.dataType, col.nullable, col.tableColumn);
           });
 
-          batch.push(values);
-
-          // Insert batch
-          if (batch.length >= appConfig.query.batchInsertSize) {
-            parser.pause();
-
-            Promise.all(batch.map((vals) => client.query(insertSQL, vals)))
-              .then(() => {
-                rowsInserted += batch.length;
-                batch = [];
-                parser.resume();
-              })
-              .catch((error) => {
-                errors.push({
-                  row: currentRow,
-                  message: error instanceof Error ? error.message : 'Insert failed',
-                });
-                batch = [];
-                parser.resume();
-              });
-          }
+          validatedRows.push(values);
         } catch (error) {
-          errors.push({
-            row: currentRow,
-            message: error instanceof Error ? error.message : 'Conversion failed',
-          });
+          // Validation failed - abort immediately
+          if (error instanceof ValidationError) {
+            throw new ApiError(
+              `Import failed at row ${rowNumber}. Column '${error.column}' ${error.reason}. The entire import has been rolled back.`,
+              400
+            );
+          }
+          throw error;
         }
-      });
+      }
 
-      parser.on('error', (error: Error) => {
-        reject(new ApiError(`CSV parsing failed: ${error.message}`, 400));
-      });
+      // All rows validated - now insert them in batches for performance
+      const columnNames = request.columnMappings.map((col) => `"${col.tableColumn}"`).join(', ');
+      const placeholders = request.columnMappings.map(() => `?`).join(', ');
+      const insertSQL = `INSERT INTO "${request.tableName}" (${columnNames}) VALUES (${placeholders})`;
 
-      parser.on('end', async () => {
-        // Insert remaining batch
-        if (batch.length > 0) {
+      let rowsInserted = 0;
+      const batchSize = appConfig.query.batchInsertSize;
+
+      // Prepare statement once for reuse (cached by dbAdapter)
+      for (let i = 0; i < validatedRows.length; i += batchSize) {
+        const batch = validatedRows.slice(i, Math.min(i + batchSize, validatedRows.length));
+        
+        // Insert batch using prepared statement
+        for (let j = 0; j < batch.length; j++) {
+          const values = batch[j];
+          const rowNumber = i + j + 2;
+
           try {
-            await Promise.all(batch.map((vals) => client.query(insertSQL, vals)));
-            rowsInserted += batch.length;
+            db.execute(insertSQL, values);
+            rowsInserted++;
           } catch (error) {
-            errors.push({
-              row: currentRow,
-              message: error instanceof Error ? error.message : 'Insert failed',
-            });
+            // Insert failed - this will trigger transaction rollback
+            const errorMsg = error instanceof Error ? error.message : 'Insert failed';
+            
+            // Extract constraint info from SQLite error
+            let naturalMessage = `Import failed at row ${rowNumber}. ${errorMsg}. The entire import has been rolled back.`;
+
+            if (errorMsg.includes('UNIQUE constraint failed')) {
+              const match = errorMsg.match(/UNIQUE constraint failed: .*?\.(\w+)/);
+              const column = match ? match[1] : 'unknown';
+              const value = values[request.columnMappings.findIndex(m => m.tableColumn === column)];
+              naturalMessage = `Import failed at row ${rowNumber}. Duplicate value '${value}' violates UNIQUE constraint on column '${column}'. No data has been imported.`;
+            } else if (errorMsg.includes('NOT NULL constraint failed')) {
+              const match = errorMsg.match(/NOT NULL constraint failed: .*?\.(\w+)/);
+              const column = match ? match[1] : 'unknown';
+              naturalMessage = `Import failed at row ${rowNumber}. Column '${column}' cannot be NULL. No data has been imported.`;
+            } else if (errorMsg.includes('FOREIGN KEY constraint failed')) {
+              naturalMessage = `Import failed at row ${rowNumber}. Foreign key constraint violation. No data has been imported.`;
+            }
+
+            throw new ApiError(naturalMessage, 400);
           }
         }
-        resolve();
-      });
+        
+        logger.info('Batch inserted', {
+          filename,
+          batchStart: i + 1,
+          batchEnd: Math.min(i + batchSize, validatedRows.length),
+          totalRows: validatedRows.length
+        });
+      }
 
-      fileStream.pipe(parser);
+      return { rowsInserted, errors: parseErrors };
     });
-
-    await client.query('COMMIT');
 
     const duration = Date.now() - startTime;
 
-    logger.info('CSV import completed', {
+    logger.info('CSV import completed successfully', {
       filename,
-      schema: request.schema,
       table: request.tableName,
-      rowsInserted,
-      errors: errors.length,
+      rowsInserted: result.rowsInserted,
       duration: `${duration}ms`,
     });
 
     return {
       success: true,
-      rowsInserted,
+      rowsInserted: result.rowsInserted,
       duration,
-      errors,
-      message: `Successfully imported ${rowsInserted} rows${errors.length > 0 ? ` with ${errors.length} errors` : ''}`,
+      errors: result.errors,
+      message: `Successfully imported ${result.rowsInserted}  rows`,
     };
   } catch (error) {
-    if (client) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackError) {
-        logger.error('Rollback failed', { rollbackError });
-      }
-    }
-
     logger.error('CSV import failed', { filename, error });
 
     if (error instanceof ApiError) {
@@ -288,78 +344,124 @@ export async function importCSV(
       error instanceof Error ? error.message : 'CSV import failed',
       500
     );
-  } finally {
-    if (client) {
-      try {
-        client.release();
-      } catch (releaseError) {
-        logger.error('Failed to release database client', { releaseError });
-      }
-    }
   }
 }
 
-function inferType(value: string): string {
-  if (!value) return 'text';
+class ValidationError extends Error {
+  constructor(public column: string, public reason: string) {
+    super(`Validation failed for column ${column}: ${reason}`);
+    this.name = 'ValidationError';
+  }
+}
+
+function inferSQLiteType(value: string): string {
+  if (!value) return 'TEXT';
 
   // Check integer
   if (/^-?\d+$/.test(value)) {
-    const num = parseInt(value, 10);
-    if (num >= -2147483648 && num <= 2147483647) {
-      return 'integer';
-    }
-    return 'bigint';
+    return 'INTEGER';
   }
 
   // Check float
   if (/^-?\d*\.\d+$/.test(value)) {
-    return 'numeric';
+    return 'REAL';
   }
 
   // Check boolean
   if (/^(true|false|t|f|yes|no|1|0)$/i.test(value)) {
-    return 'boolean';
+    return 'INTEGER';
   }
 
-  // Check date
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return 'date';
-  }
-
-  // Check timestamp
-  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value)) {
-    return 'timestamp';
-  }
-
-  return 'text';
+  return 'TEXT';
 }
 
-function convertValue(value: string, dataType: string): unknown {
+function mapToSQLiteType(pgType: string): string {
+  const lowerType = pgType.toLowerCase();
+
+  if (lowerType.includes('int') || lowerType.includes('serial')) {
+    return 'INTEGER';
+  }
+
+  if (lowerType.includes('numeric') || lowerType.includes('decimal') || 
+      lowerType.includes('float') || lowerType.includes('double') || 
+      lowerType.includes('real')) {
+    return 'REAL';
+  }
+
+  if (lowerType.includes('bool')) {
+    return 'INTEGER';
+  }
+
+  if (lowerType.includes('blob') || lowerType.includes('bytea')) {
+    return 'BLOB';
+  }
+
+  return 'TEXT';
+}
+
+function convertAndValidateValue(
+  value: string,
+  dataType: string,
+  nullable: boolean,
+  columnName: string
+): unknown {
+  // Handle null values
   if (!value || value === '') {
+    if (!nullable) {
+      throw new ValidationError(columnName, 'cannot be empty (NOT NULL constraint)');
+    }
     return null;
   }
 
   const lowerType = dataType.toLowerCase();
 
+  // INTEGER validation (with smart boolean conversion)
   if (lowerType.includes('int') || lowerType.includes('serial')) {
-    return parseInt(value, 10);
-  }
-
-  if (lowerType.includes('numeric') || lowerType.includes('decimal') || lowerType.includes('float') || lowerType.includes('double')) {
-    return parseFloat(value);
-  }
-
-  if (lowerType.includes('bool')) {
-    return /^(true|t|yes|1)$/i.test(value);
-  }
-
-  if (lowerType.includes('json')) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
+    // Check if value looks like a boolean (Yes/No, True/False, etc.)
+    if (/^(true|t|yes|y)$/i.test(value)) {
+      return 1;
     }
+    if (/^(false|f|no|n)$/i.test(value)) {
+      return 0;
+    }
+    
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed)) {
+      throw new ValidationError(columnName, `expected an INTEGER but received '${value}'. Hint: Use 1/0 for boolean values.`);
+    }
+    return parsed;
   }
 
+  // REAL/NUMERIC validation (with smart boolean conversion)
+  if (lowerType.includes('numeric') || lowerType.includes('decimal') || 
+      lowerType.includes('float') || lowerType.includes('double') || 
+      lowerType.includes('real')) {
+    // Check if value looks like a boolean
+    if (/^(true|t|yes|y)$/i.test(value)) {
+      return 1.0;
+    }
+    if (/^(false|f|no|n)$/i.test(value)) {
+      return 0.0;
+    }
+    
+    const parsed = parseFloat(value);
+    if (isNaN(parsed)) {
+      throw new ValidationError(columnName, `expected a REAL number but received '${value}'`);
+    }
+    return parsed;
+  }
+
+  // BOOLEAN validation
+  if (lowerType.includes('bool')) {
+    if (/^(true|t|yes|y|1)$/i.test(value)) {
+      return 1;
+    }
+    if (/^(false|f|no|n|0)$/i.test(value)) {
+      return 0;
+    }
+    throw new ValidationError(columnName, `expected a BOOLEAN but received '${value}'`);
+  }
+
+  // TEXT - return as-is
   return value;
 }

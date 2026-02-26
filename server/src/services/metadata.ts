@@ -2,270 +2,262 @@ import { Database, Schema, Table, TableStructure, Column, Index, Constraint } fr
 import { ApiError } from '../middleware/errorHandler';
 import * as connectionService from './connections';
 import logger from '../utils/logger';
+import fs from 'fs';
+import path from 'path';
 
-export async function getDatabases(connectionId: string): Promise<Database[]> {
+export function getDatabases(connectionId: string): Database[] {
   const connection = connectionService.getConnectionById(connectionId);
 
   if (!connection) {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
 
-  const pool = connectionService.createPool(connection);
-  const client = await pool.connect();
+  // In SQLite, each database is a file in the data directory
+  // List all database files for this connection
+  const dataDir = path.join(process.cwd(), 'data');
+  const databases: Database[] = [];
 
-  try {
-    const result = await client.query(`
-      SELECT 
-        datname as name,
-        pg_catalog.pg_get_userbyid(datdba) as owner,
-        pg_encoding_to_char(encoding) as encoding,
-        pg_size_pretty(pg_database_size(datname)) as size
-      FROM pg_database
-      WHERE datistemplate = false
-      ORDER BY datname
-    `);
+  if (fs.existsSync(dataDir)) {
+    const files = fs.readdirSync(dataDir);
+    const prefix = `${connectionId}_`;
+    
+    for (const file of files) {
+      // Only include files for this connection
+      if (file.startsWith(prefix) && file.endsWith('.db')) {
+        // Clean database name: remove connectionId prefix and .db extension
+        const dbName = file.slice(prefix.length, -3); // Remove prefix and '.db'
+        const filePath = path.join(dataDir, file);
+        
+        try {
+          const stats = fs.statSync(filePath);
+          const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2);
 
-    logger.info('Retrieved databases', { connectionId, count: result.rowCount });
-
-    return result.rows as Database[];
-  } finally {
-    client.release();
+          databases.push({
+            name: dbName,
+            owner: 'local',
+            encoding: 'UTF-8',
+            size: `${sizeInMB} MB`,
+          });
+        } catch (error) {
+          logger.warn('Failed to stat database file', { file, error });
+        }
+      }
+    }
   }
+
+  // If no databases found, include the default database as placeholder
+  if (databases.length === 0 && connection.defaultDatabase) {
+    databases.push({
+      name: connection.defaultDatabase,
+      owner: 'local',
+      encoding: 'UTF-8',
+      size: '0 MB',
+    });
+  }
+
+  logger.info('Retrieved databases for SQLite connection', { 
+    connectionId, 
+    count: databases.length,
+    databases: databases.map(db => db.name)
+  });
+
+  return databases.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getSchemas(connectionId: string, database: string): Promise<Schema[]> {
+export function getSchemas(connectionId: string, database: string): Schema[] {
   const connection = connectionService.getConnectionById(connectionId);
 
   if (!connection) {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
 
-  const pool = connectionService.createPool(connection, database);
-  const client = await pool.connect();
+  // SQLite doesn't have separate schemas like PostgreSQL
+  // Return a single 'main' schema
+  logger.info('Retrieved schemas', { connectionId, database, count: 1 });
 
-  try {
-    const result = await client.query(`
-      SELECT 
-        schema_name as name,
-        schema_owner as owner
-      FROM information_schema.schemata
-      WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-      ORDER BY schema_name
-    `);
-
-    logger.info('Retrieved schemas', { connectionId, database, count: result.rowCount });
-
-    return result.rows as Schema[];
-  } finally {
-    client.release();
-  }
+  return [
+    {
+      name: 'main',
+      owner: 'local',
+    },
+  ];
 }
 
-export async function getTables(connectionId: string, database: string, schema: string): Promise<Table[]> {
+export function getTables(connectionId: string, database: string, schema: string): Table[] {
   const connection = connectionService.getConnectionById(connectionId);
 
   if (!connection) {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
 
-  const pool = connectionService.createPool(connection, database);
-  const client = await pool.connect();
+  const db = connectionService.getDatabase(connection, database);
 
   try {
-    const result = await client.query(`
+    const result = db.execute(`
       SELECT 
-        t.table_name as name,
-        t.table_schema as schema,
-        CASE 
-          WHEN t.table_type = 'BASE TABLE' THEN 'table'
-          WHEN t.table_type = 'VIEW' THEN 'view'
-          ELSE 'table'
-        END as type,
-        pg_size_pretty(pg_total_relation_size('"' || t.table_schema || '"."' || t.table_name || '"')) as size
-      FROM information_schema.tables t
-      WHERE t.table_schema = $1
-        AND t.table_type IN ('BASE TABLE', 'VIEW')
-      ORDER BY t.table_name
-    `, [schema]);
+        name,
+        type
+      FROM sqlite_master
+      WHERE type IN ('table', 'view')
+        AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `);
 
-    // Get row counts for tables (not views)
     const tables: Table[] = [];
+
     for (const row of result.rows) {
+      const tableName = row.name as string;
+      const tableType = row.type as string;
+
       let rowCount: number | undefined;
 
-      if (row.type === 'table') {
+      // Get row count for tables
+      if (tableType === 'table') {
         try {
-          const countResult = await client.query(
-            `SELECT COUNT(*) as count FROM "${schema}"."${row.name}"`
-          );
-          rowCount = parseInt(countResult.rows[0].count, 10);
+          const countResult = db.execute(`SELECT COUNT(*) as count FROM "${tableName}"`);
+          rowCount = countResult.rows[0]?.count as number;
         } catch (error) {
-          // Skip count if query fails
-          logger.warn('Failed to get row count', { schema, table: row.name, error });
+          logger.warn('Failed to get row count', { table: tableName, error });
         }
       }
 
       tables.push({
-        name: row.name,
-        schema: row.schema,
-        type: row.type,
-        size: row.size,
+        name: tableName,
+        schema: 'main',
+        type: tableType as 'table' | 'view',
         rowCount,
+        size: undefined,
       });
     }
 
     logger.info('Retrieved tables', { connectionId, database, schema, count: tables.length });
 
     return tables;
-  } finally {
-    client.release();
+  } catch (error) {
+    logger.error('Failed to retrieve tables', { connectionId, database, error });
+    throw new ApiError('Failed to retrieve tables', 500);
   }
 }
 
-export async function getTableStructure(
+export function getTableStructure(
   connectionId: string,
   database: string,
   schema: string,
   tableName: string
-): Promise<TableStructure> {
+): TableStructure {
   const connection = connectionService.getConnectionById(connectionId);
 
   if (!connection) {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
 
-  const pool = connectionService.createPool(connection, database);
-  const client = await pool.connect();
+  const db = connectionService.getDatabase(connection, database);
 
   try {
     // Get table info
-    const tableResult = await client.query(`
-      SELECT 
-        table_name as name,
-        table_schema as schema,
-        CASE 
-          WHEN table_type = 'BASE TABLE' THEN 'table'
-          WHEN table_type = 'VIEW' THEN 'view'
-          ELSE 'table'
-        END as type
-      FROM information_schema.tables
-      WHERE table_schema = $1 AND table_name = $2
-    `, [schema, tableName]);
+    const tableResult = db.execute(`
+      SELECT name, type
+      FROM sqlite_master
+      WHERE name = ? AND type IN ('table', 'view')
+    `, [tableName]);
 
     if (tableResult.rows.length === 0) {
       throw new ApiError('Table not found', 404);
     }
 
-    const table: Table = tableResult.rows[0];
+    const table: Table = {
+      name: tableResult.rows[0].name as string,
+      schema: 'main',
+      type: tableResult.rows[0].type as 'table' | 'view',
+    };
 
-    // Get columns
-    const columnsResult = await client.query(`
-      SELECT 
-        c.column_name as name,
-        c.data_type as data_type,
-        c.is_nullable = 'YES' as is_nullable,
-        c.column_default as default_value,
-        c.character_maximum_length as max_length,
-        c.numeric_precision as precision,
-        c.numeric_scale as scale,
-        CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
-        CASE WHEN u.column_name IS NOT NULL THEN true ELSE false END as is_unique,
-        pgd.description as comment
-      FROM information_schema.columns c
-      LEFT JOIN (
-        SELECT ku.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage ku 
-          ON tc.constraint_name = ku.constraint_name
-          AND tc.table_schema = ku.table_schema
-        WHERE tc.constraint_type = 'PRIMARY KEY'
-          AND tc.table_schema = $1
-          AND tc.table_name = $2
-      ) pk ON c.column_name = pk.column_name
-      LEFT JOIN (
-        SELECT ku.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage ku 
-          ON tc.constraint_name = ku.constraint_name
-          AND tc.table_schema = ku.table_schema
-        WHERE tc.constraint_type = 'UNIQUE'
-          AND tc.table_schema = $1
-          AND tc.table_name = $2
-      ) u ON c.column_name = u.column_name
-      LEFT JOIN pg_catalog.pg_statio_all_tables st 
-        ON st.schemaname = c.table_schema AND st.relname = c.table_name
-      LEFT JOIN pg_catalog.pg_description pgd 
-        ON pgd.objoid = st.relid AND pgd.objsubid = c.ordinal_position
-      WHERE c.table_schema = $1 AND c.table_name = $2
-      ORDER BY c.ordinal_position
-    `, [schema, tableName]);
+    // Get columns using PRAGMA
+    const columnsResult = db.execute(`PRAGMA table_info("${tableName}")`);
 
     const columns: Column[] = columnsResult.rows.map((row: Record<string, unknown>) => ({
       name: row.name as string,
-      dataType: row.data_type as string,
-      isNullable: row.is_nullable as boolean,
-      defaultValue: row.default_value as string | null,
-      maxLength: row.max_length as number | null,
-      precision: row.precision as number | null,
-      scale: row.scale as number | null,
-      isPrimaryKey: row.is_primary_key as boolean,
-      isUnique: row.is_unique as boolean,
-      comment: row.comment as string | null,
+      dataType: row.type as string || 'TEXT',
+      isNullable: (row.notnull as number) === 0,
+      defaultValue: row.dflt_value as string | null,
+      maxLength: null,
+      precision: null,
+      scale: null,
+      isPrimaryKey: (row.pk as number) > 0,
+      isUnique: false, // Will be updated from index info
+      comment: null,
     }));
 
     // Get indexes
-    const indexesResult = await client.query(`
-      SELECT
-        i.indexname as name,
-        array_agg(a.attname ORDER BY a.attnum) as columns,
-        ix.indisunique as is_unique,
-        ix.indisprimary as is_primary,
-        am.amname as index_type,
-        pg_get_indexdef(ix.indexrelid) as definition
-      FROM pg_indexes i
-      JOIN pg_class c ON c.relname = i.indexname
-      JOIN pg_index ix ON ix.indexrelid = c.oid
-      JOIN pg_class t ON t.oid = ix.indrelid
-      JOIN pg_namespace n ON n.oid = t.relnamespace
-      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-      JOIN pg_am am ON am.oid = c.relam
-      WHERE i.schemaname = $1 AND i.tablename = $2
-      GROUP BY i.indexname, ix.indisunique, ix.indisprimary, am.amname, ix.indexrelid
-      ORDER BY i.indexname
-    `, [schema, tableName]);
+    const indexListResult = db.execute(`PRAGMA index_list("${tableName}")`);
+    const indexes: Index[] = [];
 
-    const indexes: Index[] = indexesResult.rows.map((row: Record<string, unknown>) => ({
-      name: row.name as string,
-      columns: row.columns as string[],
-      isUnique: row.is_unique as boolean,
-      isPrimary: row.is_primary as boolean,
-      indexType: row.index_type as string,
-      definition: row.definition as string,
-    }));
+    for (const idxRow of indexListResult.rows) {
+      const indexName = idxRow.name as string;
+      const isUnique = (idxRow.unique as number) === 1;
+      const origin = idxRow.origin as string;
+
+      // Get index columns
+      const indexInfoResult = db.execute(`PRAGMA index_info("${indexName}")`);
+      const indexColumns = indexInfoResult.rows.map(col => col.name as string);
+
+      // Mark columns as unique if in a unique index
+      if (isUnique && indexColumns.length === 1) {
+        const column = columns.find(c => c.name === indexColumns[0]);
+        if (column) {
+          column.isUnique = true;
+        }
+      }
+
+      indexes.push({
+        name: indexName,
+        columns: indexColumns,
+        isUnique,
+        isPrimary: origin === 'pk',
+        indexType: 'btree',
+        definition: `INDEX ${indexName} ON ${tableName} (${indexColumns.join(', ')})`,
+      });
+    }
 
     // Get constraints
-    const constraintsResult = await client.query(`
-      SELECT
-        tc.constraint_name as name,
-        tc.constraint_type as type,
-        pg_get_constraintdef(pgc.oid) as definition,
-        array_agg(kcu.column_name) as columns
-      FROM information_schema.table_constraints tc
-      JOIN pg_constraint pgc ON pgc.conname = tc.constraint_name
-      LEFT JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      WHERE tc.table_schema = $1 AND tc.table_name = $2
-      GROUP BY tc.constraint_name, tc.constraint_type, pgc.oid
-      ORDER BY tc.constraint_name
-    `, [schema, tableName]);
+    const constraints: Constraint[] = [];
 
-    const constraints: Constraint[] = constraintsResult.rows.map((row: Record<string, unknown>) => ({
-      name: row.name as string,
-      type: row.type as 'PRIMARY KEY' | 'FOREIGN KEY' | 'UNIQUE' | 'CHECK',
-      definition: row.definition as string,
-      columns: (row.columns as (string | null)[]).filter((c): c is string => c !== null),
-    }));
+    // Primary key constraint
+    const pkColumns = columns.filter(c => c.isPrimaryKey).map(c => c.name);
+    if (pkColumns.length > 0) {
+      constraints.push({
+        name: 'PRIMARY',
+        type: 'PRIMARY KEY',
+        definition: `PRIMARY KEY (${pkColumns.join(', ')})`,
+        columns: pkColumns,
+      });
+    }
+
+    // Foreign keys
+    const fkResult = db.execute(`PRAGMA foreign_key_list("${tableName}")`);
+    const fkMap = new Map<number, any[]>();
+
+    for (const fkRow of fkResult.rows) {
+      const fkId = fkRow.id as number;
+      if (!fkMap.has(fkId)) {
+        fkMap.set(fkId, []);
+      }
+      fkMap.get(fkId)!.push(fkRow);
+    }
+
+    let fkIndex = 0;
+    for (const [_, fkRows] of fkMap) {
+      const firstRow = fkRows[0];
+      const fromCols = fkRows.map(r => r.from as string);
+      const toCols = fkRows.map(r => r.to as string);
+      const refTable = firstRow.table as string;
+
+      constraints.push({
+        name: `fk_${tableName}_${fkIndex++}`,
+        type: 'FOREIGN KEY',
+        definition: `FOREIGN KEY (${fromCols.join(', ')}) REFERENCES ${refTable} (${toCols.join(', ')})`,
+        columns: fromCols,
+      });
+    }
 
     logger.info('Retrieved table structure', { connectionId, database, schema, table: tableName });
 
@@ -275,7 +267,13 @@ export async function getTableStructure(
       indexes,
       constraints,
     };
-  } finally {
-    client.release();
+  } catch (error) {
+    logger.error('Failed to retrieve table structure', { connectionId, database, table: tableName, error });
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    throw new ApiError('Failed to retrieve table structure', 500);
   }
 }

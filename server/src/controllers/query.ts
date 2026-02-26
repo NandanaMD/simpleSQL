@@ -16,6 +16,9 @@ export const executeQuery = asyncHandler(async (req: Request, res: Response) => 
 
   const result = await queryService.executeQuery(request);
 
+  // Set appropriate headers for fast response
+  res.setHeader('Content-Type', 'application/json');
+  
   res.json({
     success: true,
     data: result,

@@ -1,8 +1,8 @@
 {
-  "name": "sql-ide",
+  "name": "simple-sql",
   "version": "1.0.0",
-  "description": "Production-grade local desktop SQL IDE for PostgreSQL",
-  "main": "dist/electron/main.js",
+  "description": "A user-friendly SQL database tool with natural syntax support",
+  "main": "electron/dist/main.js",
   "private": true,
   "type": "commonjs",
   "workspaces": [
@@ -17,10 +17,12 @@
     "dev:client": "cd client && npm run dev",
     "dev:electron": "cd electron && npm run dev",
     "dev": "concurrently -n \"server,client,electron\" -c \"blue,magenta,cyan\" \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:electron\"",
+    "build:shared": "cd shared && npm run build",
     "build:server": "cd server && npm run build",
     "build:client": "cd client && npm run build",
     "build:electron": "cd electron && npm run build",
-    "build": "npm run build:server && npm run build:client && npm run build:electron",
+    "prepare:server": "node scripts/prepare-server.js",
+    "build": "npm run build:shared && npm run build:server && npm run build:client && npm run build:electron && npm run prepare:server",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
@@ -30,43 +32,104 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "build": {
-    "appId": "com.sqlide.app",
-    "productName": "SQL IDE",
+    "appId": "com.simplesql.app",
+    "productName": "SimpleSQL",
     "directories": {
-      "output": "release",
+      "output": "dist-installer",
       "buildResources": "build"
     },
     "files": [
-      "dist/**/*",
-      "node_modules/**/*",
-      "package.json"
+      "electron/dist/**/*",
+      "package.json",
+      "!client/node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "**/*.node"
     ],
     "extraResources": [
       {
         "from": "server/dist",
-        "to": "server"
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "server/node_modules",
+        "to": "server/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "server/package.json",
+        "to": "server/package.json"
+      },
+      {
+        "from": "server/config",
+        "to": "server/config",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "client/dist",
-        "to": "client"
+        "to": "client",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis"],
-      "icon": "build/icon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/favicon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "build/icon.png",
       "category": "Development"
     }
   },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.3",
+    "dotenv": "^16.3.1",
+    "electron-is-dev": "^2.0.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "multer": "^1.4.5-lts.1",
+    "nanoid": "^3.3.7",
+    "winston": "^3.11.0"
+  },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/node": "^20.11.0",
     "concurrently": "^8.2.2",
     "electron": "^28.1.0",
@@ -83,6 +146,6 @@
     "electron",
     "database"
   ],
-  "author": "SQL IDE",
+  "author": "SimpleSQL",
   "license": "MIT"
 }
