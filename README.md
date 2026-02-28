@@ -1,226 +1,165 @@
-SimpleSQL
+# SimpleSQL
 
-A modern, beginner-friendly SQL learning tool with structured error guidance and simplified syntax support.
+SimpleSQL is a desktop SQL learning IDE designed for clarity-first practice. It combines a modern query editor, structured error guidance, and a deterministic learning syntax layer so beginners can understand what SQL is doing, not just run commands.
 
-SimpleSQL is a desktop SQL IDE built with learning clarity in mind.
-It focuses on clean UI, human-readable error explanations, and an optional simplified command mode called SimpleSyntax.
+## Why SimpleSQL
 
-This is not a competitor to enterprise database tools.
-It is a structured SQL learning environment.
+Most database tools are built for experienced engineers and database administrators. SimpleSQL is built for learners who want:
 
-✨ Core Features
-🟦 Standard SQL Mode
+- A cleaner path from beginner queries to standard SQL
+- Explanations that are precise and human-readable
+- A focused local desktop workflow without external database setup
 
-Full support for standard SQL queries
+## Key Features
 
-Monaco editor integration
+### Standard SQL Workspace
 
-Syntax highlighting
+- Full standard SQL query support
+- Monaco-powered editor with syntax highlighting
+- Structured error interpretation with token-level guidance
+- Per-tab result isolation to avoid result cross-contamination
 
-Structured error interpretation
+### SimpleSyntax Learning Mode
 
-Result grid with per-tab isolation
-
-🟢 SimpleSyntax Mode (Learning Mode)
-
-A simplified command layer that translates natural, structured commands into SQL.
+SimpleSyntax is a deterministic, rule-based command format that translates into SQL.
 
 Example:
 
+```text
 show products all
+```
 
-Translates to:
+Generated SQL:
 
+```sql
 SELECT * FROM products;
+```
 
-Generated SQL is displayed before execution to help learners understand the mapping.
+The translated SQL is shown before execution to reinforce learning.
 
-🧠 Human-Readable Error System
+### Human-Readable Error Guidance
 
-Instead of raw database engine errors, SimpleSQL:
-
-Interprets SQLite error messages
-
-Highlights the exact problematic token in Monaco
-
-Provides structured, calm explanations
-
-Keeps raw logic intact (no silent auto-fixes)
+Instead of presenting raw engine output only, SimpleSQL interprets common SQLite errors and explains the likely issue in plain language while preserving the original logic.
 
 Example:
 
-Raw:
+- Raw: no such column: salery
+- Explained: The column "salery" does not exist. Check spelling or verify the table structure.
 
-no such column: salery
+### CSV Import Wizard
 
-SimpleSQL:
+- File preview and header detection
+- Column mapping and type selection
+- Strict atomic import behavior
+- Full rollback on failed validation
 
-The column "salery" does not exist. Check spelling or verify the table structure.
-📊 Result Management
+If any row fails, the import is not committed.
 
-Each editor tab maintains its own result sheet
+## Technology Stack
 
-Results are tied to the active query tab
+- Desktop shell: Electron
+- Frontend: React + Vite + Tailwind + Monaco Editor
+- API/runtime: Node.js + Express
+- Database engine: SQLite via better-sqlite3
+- Language: TypeScript
 
-Clear indication of active mode and active query
+## Architecture Overview
 
-No shared/global result confusion
+SimpleSQL is organized as a monorepo with clear boundaries:
 
-📥 CSV Import Wizard
+- client: UI and query interaction layer
+- server: Query execution, metadata, import, backups, and API endpoints
+- electron: Desktop process and secure preload bridge
+- shared: Shared types and contracts
 
-Industry-style CSV import with:
+## SimpleSyntax v1 Commands
 
-File preview
-
-Header detection
-
-Column mapping
-
-Type selection
-
-Strict atomic import
-
-Full rollback on failure
-
-Human-readable import errors
-
-If any row fails validation, no data is imported.
-
-🔄 Database Engine
-
-SimpleSQL uses:
-
-SQLite (via better-sqlite3)
-
-No external server required
-
-No installation setup
-
-Fully self-contained desktop database
-
-Designed for frictionless learning.
-
-🧱 Architecture Highlights
-
-Electron-based desktop app
-
-Monaco editor
-
-Deterministic rule-based error interpreter
-
-Translation layer for SimpleSyntax
-
-Clear separation of:
-
-UI
-
-Execution engine
-
-Error handling
-
-Syntax translation
-
-🟢 SimpleSyntax (Supported Commands v1)
-
-Basic deterministic commands:
-
+```text
 SELECT
 show products
 show products name price
 show products where price > 100
 show products order by price desc
 show products limit 10
-Aggregates
+
+AGGREGATES
 count products
 sum products price
 avg products price
+
 INSERT
 add products name="Pen" price=10
+
 UPDATE
 update products set price=20 where id=1
+
 DELETE
 remove products where id=5
+```
 
-SimpleSyntax is structured, predictable, and not AI-based.
+## Getting Started
 
-🎯 Philosophy
+### Prerequisites
+
+- Node.js 20.x (required)
+- npm 9+
+- Windows, macOS, or Linux
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+### Run in Development
+
+```bash
+npm run dev
+```
+
+This starts the client and Electron app in development mode.
+
+### Build
+
+```bash
+npm run build
+```
+
+### Package Desktop App
+
+```bash
+npm run package:win
+```
+
+Additional options:
+
+- npm run package
+- npm run package:mac
+- npm run package:linux
+
+## Project Philosophy
 
 SimpleSQL is built around three principles:
 
-Learning over complexity
+- Learning over complexity
+- Clarity over cryptic errors
+- Structure over noise
 
-Clarity over cryptic errors
+## Roadmap
 
-Structure over noise
+- Optional AI-enhanced error explanation layer
+- JOIN support in SimpleSyntax v2
+- Query history improvements
+- Result grid performance optimization
+- Schema visualization
 
-It is designed to:
+## Contributing and Community
 
-Reduce SQL intimidation
+- [Contributing Guide](./CONTRIBUTING.md)
+- [Code of Conduct](./CODE_OF_CONDUCT.md)
+- [Security Policy](./SECURITY.md)
 
-Help beginners understand database logic
-
-Provide clean execution feedback
-
-Maintain professional tool behavior
-
-🚀 Why SimpleSQL?
-
-Most SQL tools are designed for engineers and DB administrators.
-
-SimpleSQL is designed for:
-
-Students
-
-Beginners
-
-Business analytics learners
-
-Anyone frustrated by raw SQL errors
-
-It bridges understanding instead of hiding SQL.
-
-📌 Roadmap
-
-AI-enhanced optional error explanations
-
-JOIN support in SimpleSyntax v2
-
-Query history tracking
-
-Performance optimization (virtualized grid)
-
-Schema visualization
-
-📄 License
+## License
 
 This project is licensed under the MIT License.
-See the [LICENSE](./LICENSE) file for details.
-
-🤝 Open Source Community Files
-
-This repository includes:
-
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
-- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
-- [SECURITY.md](./SECURITY.md)
-
-🛡️ Open-Source Release Checklist (Before Publishing)
-
-Before making the repository public, verify:
-
-- No real credentials or local-only connection details are committed
-- No personal/user data is present in committed `data/`, `logs/`, or generated files
-- Build artifacts in `release/`, `dist-installer/`, and `build/` are intentionally included or removed
-- Local config files are reviewed:
-	- `electron/config/connections.json`
-	- `server/config/connections.json`
-- Temporary test or debug files are reviewed and cleaned if not needed
-
-Recommended quick checks:
-
-```bash
-git grep -n -E "(api[_-]?key|token|password|secret|PRIVATE KEY|connectionString)"
-git status
-```
-
-If any sensitive value exists, rotate credentials and remove them from history before public release.
+See [LICENSE](./LICENSE) for details.
