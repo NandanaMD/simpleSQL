@@ -1,14 +1,16 @@
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import isDev from 'electron-is-dev';
 import { fork, ChildProcess } from 'child_process';
 import fs from 'fs';
 import { randomBytes } from 'crypto';
+import { autoUpdater } from 'electron-updater';
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort: number = 3000;
 const apiAuthToken = randomBytes(32).toString('hex');
+let updateInstallTimer: NodeJS.Timeout | null = null;
 
 // Log file for debugging production issues
 const logPath = isDev 
@@ -27,6 +29,87 @@ function logToFile(message: string) {
   } catch (error) {
     console.error('Failed to write to log:', error);
   }
+}
+
+function sendUpdateStatus(status: string, payload?: Record<string, unknown>): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send('app:update-status', {
+    status,
+    ...payload,
+  });
+}
+
+function setupAutoUpdater(): void {
+  if (isDev) {
+    logToFile('[Updater] Skipping auto-updater in development mode');
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    logToFile('[Updater] Checking for updates');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    logToFile(`[Updater] Update available: ${info.version}`);
+    sendUpdateStatus('available', { version: info.version });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    logToFile('[Updater] No update available');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    sendUpdateStatus('downloading', {
+      percent: Math.round(progress.percent),
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    logToFile(`[Updater] Update downloaded: ${info.version}`);
+    sendUpdateStatus('downloaded', { version: info.version });
+
+    if (updateInstallTimer) {
+      clearTimeout(updateInstallTimer);
+    }
+
+    updateInstallTimer = setTimeout(() => {
+      logToFile('[Updater] Installing update now');
+      autoUpdater.quitAndInstall(true, true);
+    }, 2000);
+  });
+
+  autoUpdater.on('error', (error) => {
+    logToFile(`[Updater] Error: ${error.message}`);
+    sendUpdateStatus('error', { message: error.message });
+  });
+
+  ipcMain.handle('app:check-for-updates', async () => {
+    try {
+      await autoUpdater.checkForUpdates();
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logToFile(`[Updater] Manual check failed: ${message}`);
+      return { ok: false, message };
+    }
+  });
+
+  autoUpdater.checkForUpdatesAndNotify().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    logToFile(`[Updater] Initial check failed: ${message}`);
+  });
+
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      logToFile(`[Updater] Scheduled check failed: ${message}`);
+    });
+  }, 6 * 60 * 60 * 1000);
 }
 
 function assertRuntimeLock(): void {
@@ -185,6 +268,7 @@ app.whenReady().then(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     createWindow(port);
+    setupAutoUpdater();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -213,6 +297,11 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   console.log('[Electron] Shutting down...');
+
+  if (updateInstallTimer) {
+    clearTimeout(updateInstallTimer);
+    updateInstallTimer = null;
+  }
 
   if (serverProcess) {
     serverProcess.kill('SIGTERM');

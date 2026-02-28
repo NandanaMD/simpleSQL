@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "A user-friendly SQL database tool with natural syntax support",
   "main": "electron/dist/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NandanaMD/simpleSQL.git"
+  },
   "private": true,
   "type": "commonjs",
   "workspaces": [
@@ -27,8 +31,13 @@
     "build": "npm run build:shared && npm run build:server && npm run build:client && npm run build:electron && npm run prepare:server",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
+    "package:win:publish": "npm run build && electron-builder --win --publish always",
     "package:mac": "npm run build && electron-builder --mac",
     "package:linux": "npm run build && electron-builder --linux",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major",
     "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "typecheck": "npm run typecheck --workspaces --if-present"
@@ -114,7 +123,14 @@
       ],
       "icon": "build/icon.png",
       "category": "Development"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "NandanaMD",
+        "repo": "simpleSQL"
+      }
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
@@ -123,6 +139,7 @@
     "csv-parse": "^5.5.3",
     "dotenv": "^16.3.1",
     "electron-is-dev": "^2.0.0",
+    "electron-updater": "^6.6.2",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",

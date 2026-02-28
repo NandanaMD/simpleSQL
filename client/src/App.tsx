@@ -13,7 +13,7 @@ import { HelpPanel } from './components/HelpPanel';
 import { SavedQueriesDialog } from './components/SavedQueriesDialog';
 import { IntroducingSimpleSyntaxDialog } from './components/IntroducingSimpleSyntaxDialog';
 import { LearnModePanel } from './components/LearnModePanel';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { Sun, Moon, Sparkles, GraduationCap } from 'lucide-react';
 import { Button } from './components/ui/button';
 import savedQueriesIcon from '../../assets/icons/saved_queries.svg';
@@ -50,6 +50,48 @@ function App() {
     // Apply theme on mount
     setTheme(theme);
   }, [fetchConnections, setTheme, theme]);
+
+  useEffect(() => {
+    if (!window.electron?.onUpdateStatus) {
+      return;
+    }
+
+    const dismissId = 'app-update-progress';
+
+    const unsubscribe = window.electron.onUpdateStatus((event) => {
+      if (event.status === 'available') {
+        toast.message(`Update available${event.version ? `: v${event.version}` : ''}`, {
+          description: 'Downloading in background...',
+          duration: 3500,
+        });
+      }
+
+      if (event.status === 'downloading' && typeof event.percent === 'number') {
+        toast.message(`Downloading update ${event.percent}%`, {
+          id: dismissId,
+          duration: Number.POSITIVE_INFINITY,
+        });
+      }
+
+      if (event.status === 'downloaded') {
+        toast.success('Update downloaded. Installing now...', {
+          id: dismissId,
+          duration: 2500,
+        });
+      }
+
+      if (event.status === 'error' && event.message) {
+        toast.error('Update check failed', {
+          description: event.message,
+          duration: 4000,
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (!showConnectionHub && tabs.length === 0) {

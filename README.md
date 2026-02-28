@@ -137,6 +137,35 @@ Additional options:
 - npm run package:mac
 - npm run package:linux
 
+## Releases
+
+SimpleSQL uses GitHub Releases as the update source for the desktop auto-updater.
+
+Set a GitHub token (repo scope) before publishing:
+
+```bash
+set GH_TOKEN=your_github_token
+```
+
+Then run one of:
+
+- npm run release:patch
+- npm run release:minor
+- npm run release:major
+
+Preview without publishing changes:
+
+```bash
+node scripts/release.js patch --dry-run
+```
+
+The release script will:
+
+- bump `package.json` version
+- build and publish Windows release artifacts
+- commit and tag the version
+- push commit and tag to GitHub
+
 ## Project Philosophy
 
 SimpleSQL is built around three principles:

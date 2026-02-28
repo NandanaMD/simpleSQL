@@ -1,7 +1,14 @@
 // Preload script for Electron
 // This runs in a secure context before the renderer process loads
 
-import { contextBridge } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
+
+type UpdateStatusEvent = {
+  status: 'available' | 'downloading' | 'downloaded' | 'error' | string;
+  version?: string;
+  percent?: number;
+  message?: string;
+};
 
 function getApiAuthToken(): string {
   const supportedPrefixes = ['sqlideApiToken=', '--sqlideApiToken='];
@@ -21,4 +28,16 @@ function getApiAuthToken(): string {
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   apiAuthToken: getApiAuthToken(),
+  checkForUpdates: async () => ipcRenderer.invoke('app:check-for-updates'),
+  onUpdateStatus: (callback: (event: UpdateStatusEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: UpdateStatusEvent) => {
+      callback(payload);
+    };
+
+    ipcRenderer.on('app:update-status', listener);
+
+    return () => {
+      ipcRenderer.removeListener('app:update-status', listener);
+    };
+  },
 });
