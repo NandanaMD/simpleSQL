@@ -16,8 +16,7 @@ export async function previewCSV(buffer: Buffer, filename: string): Promise<CSVP
 
     logger.info('CSV parsing started', { 
       filename, 
-      bufferSize: buffer.length,
-      firstChars: buffer.toString('utf8', 0, Math.min(200, buffer.length))
+      bufferSize: buffer.length
     });
 
     const fileStream = Readable.from(buffer);

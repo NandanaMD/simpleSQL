@@ -16,7 +16,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
   const { editor, query, format, connection, updateEditorSettings, updateQuerySettings, updateFormatSettings, updateConnectionSettings, resetToDefaults } = useSettingsStore();
-  
+
   const [localEditor, setLocalEditor] = useState(editor);
   const [localQuery, setLocalQuery] = useState(query);
   const [localFormat, setLocalFormat] = useState(format);
@@ -72,7 +72,6 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
             </TabsTrigger>
           </TabsList>
 
-          {/* Editor Settings */}
           <TabsContent value="editor" className="space-y-4 mt-4">
             <div className="space-y-4">
               <div>
@@ -126,7 +125,6 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
             </div>
           </TabsContent>
 
-          {/* Query Settings */}
           <TabsContent value="query" className="space-y-4 mt-4">
             <div className="space-y-4">
               <div>
@@ -195,7 +193,6 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
             </div>
           </TabsContent>
 
-          {/* Format Settings */}
           <TabsContent value="format" className="space-y-4 mt-4">
             <div className="space-y-4">
               <div>
@@ -235,7 +232,6 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
             </div>
           </TabsContent>
 
-          {/* Connection Settings */}
           <TabsContent value="connection" className="space-y-4 mt-4">
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
@@ -291,9 +287,7 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>
-              Save Changes
-            </Button>
+            <Button onClick={handleSave}>Save Changes</Button>
           </div>
         </div>
       </DialogContent>

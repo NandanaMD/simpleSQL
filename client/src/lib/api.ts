@@ -15,6 +15,20 @@ import type {
   ExplainRequest,
   ExplainResult,
   ApiResponse,
+  AdaptiveCoachRequest,
+  AdaptiveCoachResponse,
+  SocraticHintRequest,
+  SocraticHintResponse,
+  ExecutionVisualizerRequest,
+  ExecutionVisualizerResponse,
+  MisconceptionDetectorRequest,
+  MisconceptionDetectorResponse,
+  AutoLabGeneratorRequest,
+  AutoLabGeneratorResponse,
+  FixQueryDrillsRequest,
+  FixQueryDrillsResponse,
+  NaturalLanguageToSqlRequest,
+  NaturalLanguageToSqlResponse,
 } from '@sql-ide/shared';
 
 function resolveApiBaseUrl(): string {
@@ -33,12 +47,40 @@ function resolveApiBaseUrl(): string {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+function resolveApiAuthToken(): string {
+  const preloadToken = window.electron?.apiAuthToken;
+  if (preloadToken) {
+    return preloadToken;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('apiToken');
+  if (urlToken) {
+    params.delete('apiToken');
+    const nextQuery = params.toString();
+    const sanitizedUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+    window.history.replaceState(null, '', sanitizedUrl);
+    return urlToken;
+  }
+
+  return '';
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  const token = resolveApiAuthToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers['x-sqlide-token'] = token;
+  }
+  return config;
 });
 
 const FATAL_TABLES_ERROR_COOLDOWN_MS = 15000;
@@ -102,6 +144,13 @@ export async function updateConnection(id: string, config: Partial<ConnectionCon
 
 export async function deleteConnection(id: string): Promise<void> {
   await api.delete(`/connections/${id}`);
+}
+
+export async function authenticateConnection(
+  id: string,
+  credentials: { username?: string; password?: string }
+): Promise<void> {
+  await api.post(`/connections/${id}/authenticate`, credentials);
 }
 
 // Query
@@ -331,6 +380,48 @@ export async function downloadBackup(filename: string): Promise<void> {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+// Learn Mode
+export async function getAdaptiveCoach(payload: AdaptiveCoachRequest): Promise<AdaptiveCoachResponse> {
+  const response = await api.post<ApiResponse<AdaptiveCoachResponse>>('/learn/coach', payload);
+  return response.data.data!;
+}
+
+export async function getSocraticHints(payload: SocraticHintRequest): Promise<SocraticHintResponse> {
+  const response = await api.post<ApiResponse<SocraticHintResponse>>('/learn/hints', payload);
+  return response.data.data!;
+}
+
+export async function getExecutionVisualization(
+  payload: ExecutionVisualizerRequest
+): Promise<ExecutionVisualizerResponse> {
+  const response = await api.post<ApiResponse<ExecutionVisualizerResponse>>('/learn/visualize', payload);
+  return response.data.data!;
+}
+
+export async function getMisconceptionAnalysis(
+  payload: MisconceptionDetectorRequest
+): Promise<MisconceptionDetectorResponse> {
+  const response = await api.post<ApiResponse<MisconceptionDetectorResponse>>('/learn/misconceptions', payload);
+  return response.data.data!;
+}
+
+export async function generateAutoLab(payload: AutoLabGeneratorRequest): Promise<AutoLabGeneratorResponse> {
+  const response = await api.post<ApiResponse<AutoLabGeneratorResponse>>('/learn/lab', payload);
+  return response.data.data!;
+}
+
+export async function generateFixQueryDrills(payload: FixQueryDrillsRequest): Promise<FixQueryDrillsResponse> {
+  const response = await api.post<ApiResponse<FixQueryDrillsResponse>>('/learn/drills', payload);
+  return response.data.data!;
+}
+
+export async function naturalLanguageToSql(
+  payload: NaturalLanguageToSqlRequest
+): Promise<NaturalLanguageToSqlResponse> {
+  const response = await api.post<ApiResponse<NaturalLanguageToSqlResponse>>('/learn/nl2sql', payload);
+  return response.data.data!;
 }
 
 export default api;

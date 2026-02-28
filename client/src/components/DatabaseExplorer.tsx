@@ -5,20 +5,15 @@ import { useImportStore } from '../stores/importStore';
 import { useEditorStore } from '../stores/editorStore';
 import { BackupManager } from './BackupManager';
 import * as api from '../lib/api';
-import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Plus, Key, Lock, Unlock, Columns3 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Key, Lock, Unlock, Columns3 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
-import { Input } from './ui/input';
-import { Button } from './ui/button';
-import { Label } from './ui/label';
-import connectionIcon from '../../../assets/icons/connection.svg';
 import selectedIcon from '../../../assets/icons/selected.svg';
 import databaseSelectedIcon from '../../../assets/icons/database_selected.svg';
 import databaseNotSelectedIcon from '../../../assets/icons/database_not_selected.svg';
 
 export function DatabaseExplorer() {
   const { connections, selectedConnectionId, selectedDatabase, setActiveConnection } = useConnectionStore();
-  const { nodes, expandedNodes, loadingNodes, addConnection, toggleNode, setNodeChildren, setNodeLoading } = useExplorerStore();
+  const { nodes, expandedNodes, loadingNodes, addConnection, toggleNode, setNodeChildren, setNodeLoading, clearNodes } = useExplorerStore();
   const { openWizard } = useImportStore();
   const { createTab, updateTabContent } = useEditorStore();
   const [contextMenu, setContextMenu] = useState<{ 
@@ -37,18 +32,45 @@ export function DatabaseExplorer() {
     };
     type: string 
   } | null>(null);
-  const [createDbDialog, setCreateDbDialog] = useState<{ open: boolean; connectionId: string | null }>({ open: false, connectionId: null });
-  const [newDbName, setNewDbName] = useState('');
   const [backupManager, setBackupManager] = useState<{ open: boolean; connectionId: string; database: string } | null>(null);
 
+  const loadDatabasesForConnection = async (connectionId: string) => {
+    setNodeLoading(connectionId, true);
+    try {
+      const databases = await api.getDatabases(connectionId);
+      const children = databases.map((db) => ({
+        id: `${connectionId}:${db.name}`,
+        type: 'database' as const,
+        label: db.name,
+        connectionId,
+        database: db.name,
+        isExpanded: false,
+        isLoading: false,
+      }));
+      setNodeChildren(connectionId, children);
+    } finally {
+      setNodeLoading(connectionId, false);
+    }
+  };
+
   useEffect(() => {
-    // Add all connections to explorer when they change
-    connections.forEach((conn) => {
-      if (!nodes.find((n) => n.id === conn.id)) {
-        addConnection(conn.id, conn.name);
-      }
+    if (!selectedConnectionId) {
+      clearNodes();
+      return;
+    }
+
+    const activeConnection = connections.find((conn) => conn.id === selectedConnectionId);
+    if (!activeConnection) {
+      clearNodes();
+      return;
+    }
+
+    clearNodes();
+    addConnection(activeConnection.id, activeConnection.name);
+    loadDatabasesForConnection(activeConnection.id).catch((error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to load databases');
     });
-  }, [connections, nodes, addConnection]);
+  }, [connections, selectedConnectionId, clearNodes, addConnection]);
 
   useEffect(() => {
     // Close context menu when clicking anywhere
@@ -125,14 +147,6 @@ export function DatabaseExplorer() {
   const handleDatabaseClick = (connectionId: string, database: string) => {
     setActiveConnection(connectionId, database);
     toast.success(`Connected to ${database}`);
-  };
-
-  const handleConnectionDoubleClick = async (connectionId: string) => {
-    const connection = connections.find(c => c.id === connectionId);
-    if (connection) {
-      setActiveConnection(connectionId, connection.defaultDatabase);
-      toast.success(`Connected to ${connection.name} / ${connection.defaultDatabase}`);
-    }
   };
 
   const handleContextMenu = (
@@ -367,33 +381,18 @@ export function DatabaseExplorer() {
   };
 
   const handleRefreshAll = async () => {
-    toast.info('Refreshing database explorer...');
-    
-    // Refresh all expanded connection nodes
-    for (const node of nodes) {
-      if (node.type === 'connection' && expandedNodes.has(node.id)) {
-        setNodeLoading(node.id, true);
-        try {
-          const databases = await api.getDatabases(node.connectionId);
-          const children = databases.map((db) => ({
-            id: `${node.connectionId}:${db.name}`,
-            type: 'database' as const,
-            label: db.name,
-            connectionId: node.connectionId,
-            database: db.name,
-            isExpanded: false,
-            isLoading: false,
-          }));
-          setNodeChildren(node.id, children);
-        } catch (error) {
-          console.error('Failed to refresh connection:', error);
-        } finally {
-          setNodeLoading(node.id, false);
-        }
-      }
+    if (!selectedConnectionId) {
+      toast.error('No active connection');
+      return;
     }
-    
-    toast.success('Database explorer refreshed');
+
+    toast.info('Refreshing databases...');
+    try {
+      await loadDatabasesForConnection(selectedConnectionId);
+      toast.success('Databases refreshed');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to refresh databases');
+    }
   };
 
   const handleCopyColumnName = () => {
@@ -433,104 +432,6 @@ export function DatabaseExplorer() {
     setContextMenu(null);
   };
 
-  const handleCreateDatabase = () => {
-    if (!contextMenu || contextMenu.type !== 'connection') {
-      return;
-    }
-    
-    const connectionId = contextMenu.connectionId;
-    setCreateDbDialog({ open: true, connectionId });
-    setContextMenu(null);
-  };
-  
-  const confirmCreateDatabase = async () => {
-    if (!createDbDialog.connectionId || !newDbName.trim()) {
-      return;
-    }
-    
-    const connectionId = createDbDialog.connectionId;
-    const trimmedName = newDbName.trim();
-    
-    // Validate database name (basic validation)
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmedName)) {
-      toast.error('Invalid database name. Use only letters, numbers, and underscores. Must start with a letter or underscore.');
-      return;
-    }
-    
-    // Close dialog and reset
-    setCreateDbDialog({ open: false, connectionId: null });
-    setNewDbName('');
-    
-    try {
-      // For SQLite, we don't need to specify an existing database to create a new one
-      const sql = `CREATE DATABASE "${trimmedName}";`;
-      await api.executeQuery({
-        connectionId: connectionId,
-        sql,
-        database: undefined,
-      });
-      
-      toast.success(`Database ${trimmedName} created successfully`);
-      
-      // Refresh the connection node to reload databases
-      const connNodeId = connectionId;
-      setNodeLoading(connNodeId, true);
-      
-      try {
-        const databases = await api.getDatabases(connectionId);
-        const children = databases.map((db) => ({
-          id: `${connectionId}:${db.name}`,
-          type: 'database' as const,
-          label: db.name,
-          connectionId: connectionId,
-          database: db.name,
-          isExpanded: false,
-          isLoading: false,
-        }));
-        
-        setNodeChildren(connNodeId, children);
-        
-        // Expand the connection if not already expanded
-        if (!expandedNodes.has(connNodeId)) {
-          toggleNode(connNodeId);
-        }
-      } finally {
-        setNodeLoading(connNodeId, false);
-      }
-    } catch (error) {
-      toast.error(`Failed to create database: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  };
-
-  const handleRefreshConnection = async () => {
-    if (!contextMenu || contextMenu.type !== 'connection') return;
-    
-    const connNodeId = contextMenu.connectionId;
-    setNodeLoading(connNodeId, true);
-    
-    try {
-      const databases = await api.getDatabases(contextMenu.connectionId);
-      const children = databases.map((db) => ({
-        id: `${contextMenu.connectionId}:${db.name}`,
-        type: 'database' as const,
-        label: db.name,
-        connectionId: contextMenu.connectionId,
-        database: db.name,
-        isExpanded: false,
-        isLoading: false,
-      }));
-      
-      setNodeChildren(connNodeId, children);
-      toast.success('Connection refreshed');
-    } catch (error) {
-      toast.error('Failed to refresh connection');
-    } finally {
-      setNodeLoading(connNodeId, false);
-    }
-    
-    setContextMenu(null);
-  };
-
   const renderNode = (node: typeof nodes[0], level: number = 0): React.ReactNode => {
     const isExpanded = expandedNodes.has(node.id);
     const isLoading = loadingNodes.has(node.id);
@@ -538,12 +439,8 @@ export function DatabaseExplorer() {
     const isSelected = node.type === 'database' && 
                       node.connectionId === selectedConnectionId && 
                       node.database === selectedDatabase;
-    const isConnectionSelected = node.type === 'connection' && node.connectionId === selectedConnectionId;
-
     const getIcon = () => {
       switch (node.type) {
-        case 'connection':
-          return <img src={connectionIcon} alt="" aria-hidden="true" className="h-4 w-4" />;
         case 'database':
           return (
             <img
@@ -578,8 +475,6 @@ export function DatabaseExplorer() {
           className={`flex items-center gap-1 py-1 px-2 hover:bg-accent cursor-pointer rounded-sm transition-colors ${
             isSelected ? 'bg-primary/20 border-l-4 border-primary font-semibold' : ''
           } ${
-            isConnectionSelected && !isSelected ? 'bg-accent/50' : ''
-          } ${
             node.type === 'column' ? 'text-xs text-muted-foreground' : 'text-sm'
           }`}
           style={{ paddingLeft: `${level * 12 + 8}px` }}
@@ -591,16 +486,13 @@ export function DatabaseExplorer() {
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
-            if (node.type === 'connection') {
-              // Double-click connection to select its default database
-              handleConnectionDoubleClick(node.connectionId);
-            } else if (node.type === 'database') {
+            if (node.type === 'database') {
               // Double-click database to select it
               handleDatabaseClick(node.connectionId, node.database || '');
             }
           }}
           onContextMenu={(e) => {
-            if (node.type === 'table' || node.type === 'database' || node.type === 'connection' || node.type === 'view' || node.type === 'column') {
+            if (node.type === 'table' || node.type === 'database' || node.type === 'view' || node.type === 'column') {
               handleContextMenu(e, node);
             }
           }}
@@ -632,6 +524,11 @@ export function DatabaseExplorer() {
     );
   };
 
+  const activeConnectionNode = selectedConnectionId
+    ? nodes.find((node) => node.id === selectedConnectionId)
+    : undefined;
+  const visibleNodes = activeConnectionNode?.children ?? [];
+
   return (
     <div className="p-2 relative flex flex-col h-full">
       <div className="flex items-center justify-between mb-2 px-2">
@@ -651,19 +548,18 @@ export function DatabaseExplorer() {
           <div className="flex items-center gap-2">
             <img src={selectedIcon} alt="" aria-hidden="true" className="h-4 w-4 text-primary" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-primary truncate">
-                {connections.find(c => c.id === selectedConnectionId)?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">{selectedDatabase}</p>
+              <p className="text-xs font-semibold text-primary truncate">{selectedDatabase}</p>
             </div>
           </div>
         </div>
       )}
 
-      {nodes.length === 0 ? (
-        <p className="text-sm text-muted-foreground px-2">No connections</p>
+      {!selectedConnectionId ? (
+        <p className="text-sm text-muted-foreground px-2">No active connection selected</p>
+      ) : visibleNodes.length === 0 ? (
+        <p className="text-sm text-muted-foreground px-2">No databases found</p>
       ) : (
-        <div className="space-y-0.5 flex-1 overflow-y-auto">{nodes.map((node) => renderNode(node))}</div>
+        <div className="space-y-0.5 flex-1 overflow-y-auto">{visibleNodes.map((node) => renderNode(node))}</div>
       )}
 
       {/* Context Menu */}
@@ -673,31 +569,6 @@ export function DatabaseExplorer() {
           style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
           onClick={(e) => e.stopPropagation()}
         >
-          {contextMenu.type === 'connection' && (
-            <>
-              <button
-                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCreateDatabase();
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Create Database...
-              </button>
-              <button
-                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRefreshConnection();
-                }}
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-            </>
-          )}
-
           {contextMenu.type === 'database' && (
             <>
               <button
@@ -850,50 +721,6 @@ export function DatabaseExplorer() {
           )}
         </div>
       )}
-      
-      {/* Create Database Dialog */}
-      <Dialog open={createDbDialog.open} onOpenChange={(open) => {
-        setCreateDbDialog({ open, connectionId: createDbDialog.connectionId });
-        if (!open) setNewDbName('');
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create Database</DialogTitle>
-            <DialogDescription>
-              Enter a name for the new database. Use only letters, numbers, and underscores. Must start with a letter or underscore.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Label htmlFor="dbname">Database Name</Label>
-            <Input
-              id="dbname"
-              value={newDbName}
-              onChange={(e) => setNewDbName(e.target.value)}
-              placeholder="my_database"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  confirmCreateDatabase();
-                }
-              }}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCreateDbDialog({ open: false, connectionId: null });
-                setNewDbName('');
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={confirmCreateDatabase}>
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Backup Manager */}
       {backupManager && (

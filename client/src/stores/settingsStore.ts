@@ -32,6 +32,7 @@ export interface ConnectionSettings {
   reconnectAttempts: number;
   reconnectDelay: number; // milliseconds
   connectionTimeout: number; // seconds
+  lastUsedConnectionId: string | null;
 }
 
 interface SettingsStore {
@@ -77,6 +78,7 @@ const defaultSettings = {
     reconnectAttempts: 3,
     reconnectDelay: 2000, // 2 seconds
     connectionTimeout: 10, // 10 seconds
+    lastUsedConnectionId: null,
   },
 };
 

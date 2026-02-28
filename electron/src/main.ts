@@ -3,10 +3,12 @@ import path from 'path';
 import isDev from 'electron-is-dev';
 import { fork, ChildProcess } from 'child_process';
 import fs from 'fs';
+import { randomBytes } from 'crypto';
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort: number = 3000;
+const apiAuthToken = randomBytes(32).toString('hex');
 
 // Log file for debugging production issues
 const logPath = isDev 
@@ -79,6 +81,7 @@ async function startServer(): Promise<number> {
         RUN_UNDER_ELECTRON: '1',
         ELECTRON_NODE_VERSION: process.version,
         ELECTRON_NODE_ABI: process.versions.modules,
+        API_AUTH_TOKEN: apiAuthToken,
         // Ensure Electron's Node.js can find modules outside asar
         NODE_PATH: nodeModulesPath,
       },
@@ -145,6 +148,7 @@ function createWindow(port: number): void {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`sqlideApiToken=${apiAuthToken}`],
     },
     title: 'SimpleSQL',
     icon: iconPath,
@@ -153,7 +157,7 @@ function createWindow(port: number): void {
 
   const startURL = isDev
     ? `http://localhost:5173/?apiPort=${port}`
-    : `http://localhost:${port}`;
+    : `http://localhost:${port}/`;
 
   mainWindow.loadURL(startURL);
 

@@ -5,6 +5,76 @@ import logger from '../utils/logger';
 import { randomUUID } from 'crypto';
 import * as dbAdapter from './dbAdapter';
 
+const CONNECTION_UNLOCK_TTL_MS = 30 * 60 * 1000;
+const unlockedConnections = new Map<string, number>();
+
+function requiresAuthentication(connection: Connection): boolean {
+  return Boolean(connection.password?.trim() || connection.username?.trim());
+}
+
+export function sanitizeConnectionForClient(connection: Connection): Connection {
+  return {
+    ...connection,
+    password: '',
+    requiresAuthentication: requiresAuthentication(connection),
+  };
+}
+
+function isConnectionUnlocked(connectionId: string): boolean {
+  const expiry = unlockedConnections.get(connectionId);
+  if (!expiry) {
+    return false;
+  }
+
+  if (expiry < Date.now()) {
+    unlockedConnections.delete(connectionId);
+    return false;
+  }
+
+  return true;
+}
+
+export function authenticateConnection(
+  connectionId: string,
+  username: string,
+  password: string
+): void {
+  const connection = getConnectionById(connectionId);
+  if (!connection) {
+    throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
+  }
+
+  if (!requiresAuthentication(connection)) {
+    unlockedConnections.set(connectionId, Date.now() + CONNECTION_UNLOCK_TTL_MS);
+    return;
+  }
+
+  const expectedUsername = connection.username || '';
+  const expectedPassword = connection.password || '';
+  const providedUsername = username || '';
+  const providedPassword = password || '';
+
+  if (expectedUsername && providedUsername !== expectedUsername) {
+    throw new ApiError('Invalid connection credentials', 401);
+  }
+
+  if (expectedPassword !== providedPassword) {
+    throw new ApiError('Invalid connection credentials', 401);
+  }
+
+  unlockedConnections.set(connectionId, Date.now() + CONNECTION_UNLOCK_TTL_MS);
+}
+
+export function ensureConnectionAccess(connection: Connection): void {
+  if (!requiresAuthentication(connection)) {
+    return;
+  }
+
+  if (!isConnectionUnlocked(connection.id)) {
+    throw new ApiError('Connection is locked. Authenticate before accessing this connection.', 401);
+  }
+}
+
 export function createConnection(config: ConnectionConfig): Connection {
   const db = getConfigDatabase();
   const now = new Date().toISOString();
@@ -61,6 +131,7 @@ export function updateConnection(id: string, config: Partial<ConnectionConfig>):
 
   db.connections[id] = updated;
   saveConfig();
+  unlockedConnections.delete(id);
 
   closeConnectionDatabases(id);
 
@@ -77,6 +148,7 @@ export function deleteConnection(id: string): void {
 
   delete db.connections[id];
   saveConfig();
+  unlockedConnections.delete(id);
 
   closeConnectionDatabases(id);
 
@@ -84,6 +156,8 @@ export function deleteConnection(id: string): void {
 }
 
 export function getDatabase(connection: Connection, database?: string) {
+  ensureConnectionAccess(connection);
+
   const dbName = database || connection.defaultDatabase;
   const dbPath = dbAdapter.getDatabasePath(connection.id, dbName);
 
@@ -95,10 +169,12 @@ export function getDatabase(connection: Connection, database?: string) {
 }
 
 export function closeConnectionDatabases(connectionId: string): void {
+  unlockedConnections.delete(connectionId);
   logger.info('Connection databases marked for closure', { connectionId });
 }
 
 export function closeAllDatabases(): void {
+  unlockedConnections.clear();
   dbAdapter.closeAll();
   logger.info('Closed all database connections');
 }

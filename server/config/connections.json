@@ -1,25 +1,16 @@
 {
   "connections": {
-    "e0ba9b4f-f39a-42e0-bef2-06240f657160": {
-      "id": "e0ba9b4f-f39a-42e0-bef2-06240f657160",
-      "name": "LocalHost",
+    "0aa4870f-ae27-4e4f-aad1-20c0c4f140e0": {
+      "id": "0aa4870f-ae27-4e4f-aad1-20c0c4f140e0",
+      "name": "Connection KTIY",
       "host": "localhost",
       "port": 5432,
-      "username": "nmd",
-      "password": "nandan123",
-      "defaultDatabase": "main",
-      "createdAt": "2026-02-25T19:57:00.720Z",
-      "updatedAt": "2026-02-25T19:57:00.720Z"
+      "username": "nandan",
+      "password": "enc:v1:muG/F+zx0iyYmE27YqJ4IO1YacOQFujGxIjkbw4ECVXGwUXepA==",
+      "defaultDatabase": "mydb",
+      "createdAt": "2026-02-28T13:24:15.983Z",
+      "updatedAt": "2026-02-28T13:24:15.983Z"
     }
   },
-  "savedQueries": {
-    "42shy_JPLxyjZkDyLxILW": {
-      "id": "42shy_JPLxyjZkDyLxILW",
-      "name": "show ",
-      "sql": "select * from",
-      "tags": [],
-      "createdAt": "2026-02-26T11:44:31.034Z",
-      "updatedAt": "2026-02-26T11:44:31.034Z"
-    }
-  }
+  "savedQueries": {}
 }

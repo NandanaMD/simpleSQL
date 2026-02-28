@@ -112,9 +112,9 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
   });
 
   try {
-    // Execute query with timeout and optimized limiting
+    // Execute query (single or multi-statement) with timeout and optimized limiting
     const result = await Promise.race([
-      executeWithOptimization(db, trimmedSql),
+      executeStatementsWithOptimization(db, trimmedSql),
       timeoutPromise
     ]);
 
@@ -203,18 +203,18 @@ async function executeWithOptimization(
 ): Promise<{ rows: Record<string, unknown>[]; rowCount: number; command: string }> {
   return new Promise((resolve, reject) => {
     try {
-      const trimmed = sql.trim();
+      const trimmed = stripTrailingSemicolons(sql.trim());
       const upperSql = trimmed.toUpperCase();
       
-      // Check if this is a SELECT query without LIMIT
-      const isSelect = upperSql.startsWith('SELECT');
+      // Check if this is a SELECT-like query without LIMIT
+      const isSelectLike = upperSql.startsWith('SELECT') || upperSql.startsWith('WITH');
       const hasLimit = /\bLIMIT\s+\d+/i.test(trimmed);
       
       let optimizedSql = trimmed;
       let needsCount = false;
       
       // For SELECT without LIMIT, add LIMIT to avoid loading massive result sets
-      if (isSelect && !hasLimit) {
+      if (isSelectLike && !hasLimit) {
         // Add LIMIT clause for performance
         optimizedSql = `${trimmed} LIMIT ${appConfig.query.maxResultRows}`;
         needsCount = true;
@@ -246,4 +246,119 @@ async function executeWithOptimization(
       reject(error);
     }
   });
+}
+
+async function executeStatementsWithOptimization(
+  db: dbAdapter.DatabaseAdapter,
+  sql: string
+): Promise<{ rows: Record<string, unknown>[]; rowCount: number; command: string }> {
+  const statements = splitSqlStatements(sql);
+
+  if (statements.length === 0) {
+    throw new Error('SQL statement cannot be empty');
+  }
+
+  let lastResult: { rows: Record<string, unknown>[]; rowCount: number; command: string } = {
+    rows: [],
+    rowCount: 0,
+    command: 'OTHER',
+  };
+
+  for (const statement of statements) {
+    lastResult = await executeWithOptimization(db, statement);
+  }
+
+  return lastResult;
+}
+
+function stripTrailingSemicolons(sql: string): string {
+  return sql.replace(/;+\s*$/, '').trim();
+}
+
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inBacktickQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < sql.length; index++) {
+    const char = sql[index];
+    const next = sql[index + 1];
+    const prev = sql[index - 1];
+
+    if (inLineComment) {
+      current += char;
+      if (char === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      current += char;
+      if (prev === '*' && char === '/') {
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote && !inBacktickQuote) {
+      if (char === '-' && next === '-') {
+        inLineComment = true;
+        current += char;
+        continue;
+      }
+
+      if (char === '/' && next === '*') {
+        inBlockComment = true;
+        current += char;
+        continue;
+      }
+    }
+
+    if (char === "'" && !inDoubleQuote && !inBacktickQuote) {
+      if (inSingleQuote && next === "'") {
+        current += "''";
+        index++;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      current += char;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote && !inBacktickQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      current += char;
+      continue;
+    }
+
+    if (char === '`' && !inSingleQuote && !inDoubleQuote) {
+      inBacktickQuote = !inBacktickQuote;
+      current += char;
+      continue;
+    }
+
+    if (char === ';' && !inSingleQuote && !inDoubleQuote && !inBacktickQuote) {
+      const statement = current.trim();
+      if (statement) {
+        statements.push(statement);
+      }
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  const finalStatement = current.trim();
+  if (finalStatement) {
+    statements.push(finalStatement);
+  }
+
+  return statements;
 }

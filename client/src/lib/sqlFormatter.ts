@@ -106,7 +106,7 @@ export function validateSQL(sql: string): { valid: boolean; errors: string[]; wa
   const hasWhereClause = /\bWHERE\b/i.test(sql);
 
   if (hasSelect && !hasFrom && !upperSQL.includes('SELECT NOW()') && !upperSQL.includes('SELECT VERSION()')) {
-    errors.push('SELECT statement typically requires a FROM clause');
+    warnings.push('SELECT statement usually uses FROM, but constants/expressions without FROM are valid');
   }
 
   // Check for potentially dangerous operations

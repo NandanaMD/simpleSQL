@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
-import { X } from 'lucide-react';
 
 interface SimpleSyntaxHelpDialogProps {
   open: boolean;
@@ -15,12 +14,6 @@ export function SimpleSyntaxHelpDialog({ open, onOpenChange }: SimpleSyntaxHelpD
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>SimpleSyntax Command Reference</DialogTitle>
-          <button
-            onClick={() => onOpenChange(false)}
-            className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </DialogHeader>
 
         {/* Tab Navigation */}

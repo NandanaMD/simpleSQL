@@ -14,6 +14,29 @@ export interface BackupInfo {
 
 const BACKUP_DIR = path.join(process.cwd(), 'server', 'backups');
 
+function isSafeBackupFilename(filename: string): boolean {
+  if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return false;
+  }
+
+  return /^[a-zA-Z0-9._-]+$/.test(filename);
+}
+
+function resolveBackupPath(filename: string): string {
+  if (!isSafeBackupFilename(filename)) {
+    throw new ApiError('Invalid backup filename', 400);
+  }
+
+  const resolvedDir = path.resolve(BACKUP_DIR);
+  const resolvedPath = path.resolve(BACKUP_DIR, filename);
+
+  if (!resolvedPath.startsWith(`${resolvedDir}${path.sep}`) && resolvedPath !== resolvedDir) {
+    throw new ApiError('Invalid backup filename', 400);
+  }
+
+  return resolvedPath;
+}
+
 // Ensure backup directory exists
 if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -70,7 +93,7 @@ export async function restoreDatabase(
   backupFilename: string
 ): Promise<void> {
   try {
-    const backupPath = path.join(BACKUP_DIR, backupFilename);
+    const backupPath = resolveBackupPath(backupFilename);
     
     if (!fs.existsSync(backupPath)) {
       throw new ApiError(`Backup file not found: ${backupFilename}`, 404);
@@ -148,15 +171,10 @@ export async function listBackups(
 
 export async function deleteBackup(filename: string): Promise<void> {
   try {
-    const backupPath = path.join(BACKUP_DIR, filename);
+    const backupPath = resolveBackupPath(filename);
     
     if (!fs.existsSync(backupPath)) {
       throw new ApiError(`Backup file not found: ${filename}`, 404);
-    }
-
-    // Security check: ensure filename doesn't contain path traversal
-    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      throw new ApiError('Invalid backup filename', 400);
     }
 
     fs.unlinkSync(backupPath);
@@ -168,15 +186,10 @@ export async function deleteBackup(filename: string): Promise<void> {
 }
 
 export async function getBackupPath(filename: string): Promise<string> {
-  const backupPath = path.join(BACKUP_DIR, filename);
+  const backupPath = resolveBackupPath(filename);
   
   if (!fs.existsSync(backupPath)) {
     throw new ApiError(`Backup file not found: ${filename}`, 404);
-  }
-
-  // Security check
-  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-    throw new ApiError('Invalid backup filename', 400);
   }
 
   return backupPath;

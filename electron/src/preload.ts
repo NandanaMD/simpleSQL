@@ -3,8 +3,22 @@
 
 import { contextBridge } from 'electron';
 
+function getApiAuthToken(): string {
+  const supportedPrefixes = ['sqlideApiToken=', '--sqlideApiToken='];
+  const tokenArg = process.argv.find((arg) => supportedPrefixes.some((prefix) => arg.startsWith(prefix)));
+  if (!tokenArg) {
+    return '';
+  }
+  const matchingPrefix = supportedPrefixes.find((prefix) => tokenArg.startsWith(prefix));
+  if (!matchingPrefix) {
+    return '';
+  }
+  return tokenArg.slice(matchingPrefix.length);
+}
+
 // Expose protected methods that allow the renderer process to use
 // specific Electron APIs without exposing the entire Electron API
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
+  apiAuthToken: getApiAuthToken(),
 });

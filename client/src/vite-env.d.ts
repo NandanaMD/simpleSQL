@@ -7,3 +7,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  electron?: {
+    platform: string;
+    apiAuthToken?: string;
+  };
+}

@@ -3,7 +3,7 @@ import { useConnectionStore } from './stores/connectionStore';
 import { useEditorStore } from './stores/editorStore';
 import { useImportStore } from './stores/importStore';
 import { useThemeStore } from './stores/themeStore';
-import { ConnectionManager } from './components/ConnectionManager';
+import { ConnectionHub } from './components/ConnectionHub';
 import { DatabaseExplorer } from './components/DatabaseExplorer';
 import { SQLEditor } from './components/SQLEditor';
 import { ResultsPanel } from './components/ResultsPanel';
@@ -12,17 +12,19 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { HelpPanel } from './components/HelpPanel';
 import { SavedQueriesDialog } from './components/SavedQueriesDialog';
 import { IntroducingSimpleSyntaxDialog } from './components/IntroducingSimpleSyntaxDialog';
+import { LearnModePanel } from './components/LearnModePanel';
 import { Toaster } from 'sonner';
-import { Sun, Moon, Sparkles } from 'lucide-react';
+import { Sun, Moon, Sparkles, GraduationCap } from 'lucide-react';
 import { Button } from './components/ui/button';
 import savedQueriesIcon from '../../assets/icons/saved_queries.svg';
 import helpIcon from '../../assets/icons/help.svg';
 import settingsIcon from '../../assets/icons/settings.svg';
 import importIcon from '../../assets/icons/import.svg';
 import connectionIcon from '../../assets/icons/connection.svg';
+import { useLearnStore } from './stores/learnStore';
 
 function App() {
-  const [showConnectionManager, setShowConnectionManager] = useState(false);
+  const [showConnectionHub, setShowConnectionHub] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSavedQueries, setShowSavedQueries] = useState(false);
@@ -31,10 +33,11 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const { fetchConnections } = useConnectionStore();
-  const { tabs, createTab, activeTabId, setTabMode } = useEditorStore();
+  const { fetchConnections, setActiveConnection } = useConnectionStore();
+  const { tabs, createTab, loadTabsForConnection, activeTabId, setTabMode } = useEditorStore();
   const { openWizard } = useImportStore();
   const { theme, toggleTheme, setTheme } = useThemeStore();
+  const { enabled: learnModeEnabled, toggle: toggleLearnMode } = useLearnStore();
 
   const handleTrySimpleSyntax = () => {
     if (activeTabId) {
@@ -49,10 +52,16 @@ function App() {
   }, [fetchConnections, setTheme, theme]);
 
   useEffect(() => {
-    if (tabs.length === 0) {
+    if (!showConnectionHub && tabs.length === 0) {
       createTab();
     }
-  }, [tabs, createTab]);
+  }, [tabs, createTab, showConnectionHub]);
+
+  const handleEnterWorkspace = (connectionId: string, database: string) => {
+    loadTabsForConnection(connectionId, database);
+    setActiveConnection(connectionId, database);
+    setShowConnectionHub(false);
+  };
 
   // Resizing logic
   const handleMouseDown = () => {
@@ -88,6 +97,15 @@ function App() {
     };
   }, [isResizing]);
 
+  if (showConnectionHub) {
+    return (
+      <>
+        <ConnectionHub onEnterWorkspace={handleEnterWorkspace} />
+        <Toaster position="top-right" />
+      </>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -96,13 +114,23 @@ function App() {
         <div className="flex items-center gap-2">
           <Button 
             size="sm" 
-            variant="default"
-            className="h-8 px-3 text-xs bg-[#0078d4] hover:bg-[#106ebe] text-white"
+            variant="outline"
+            className="h-8 px-3 text-xs"
             onClick={() => setShowIntroSimpleSyntax(true)} 
             title="Try SimpleSyntax"
           >
             <Sparkles className="h-3.5 w-3.5 mr-1.5" />
             Try SimpleSyntax
+          </Button>
+          <Button
+            size="sm"
+            variant={learnModeEnabled ? 'default' : 'outline'}
+            className="h-8 px-3 text-xs"
+            onClick={toggleLearnMode}
+            title="Toggle Learn Mode"
+          >
+            <GraduationCap className="h-3.5 w-3.5 mr-1.5" />
+            Learn Mode {learnModeEnabled ? 'On' : 'Off'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowSavedQueries(true)} title="Saved Queries">
             <img src={savedQueriesIcon} alt="" aria-hidden="true" className="h-4 w-4" />
@@ -120,9 +148,9 @@ function App() {
             <img src={importIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
             Import
           </Button>
-          <Button size="sm" onClick={() => setShowConnectionManager(true)}>
+          <Button size="sm" variant="outline" onClick={() => setShowConnectionHub(true)}>
             <img src={connectionIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
-            Connection
+            Switch Connection
           </Button>
         </div>
       </header>
@@ -134,29 +162,34 @@ function App() {
           <DatabaseExplorer />
         </aside>
 
-        {/* Main Editor Area - Resizable */}
-        <main ref={containerRef} className="flex-1 flex flex-col overflow-hidden relative">
-          {/* SQL Editor */}
-          <div style={{ height: `${editorHeight}%` }} className="overflow-hidden">
-            <SQLEditor />
-          </div>
+        <div className="flex-1 flex overflow-hidden">
+          {/* Main Editor Area - Resizable */}
+          <main ref={containerRef} className="flex-1 flex flex-col overflow-hidden relative">
+            {/* SQL Editor */}
+            <div style={{ height: `${editorHeight}%` }} className="overflow-hidden">
+              <SQLEditor />
+            </div>
 
-          {/* Resize Handle */}
-          <div 
-            className={`h-1 bg-border hover:bg-primary cursor-row-resize transition-colors ${isResizing ? 'bg-primary' : ''}`}
-            onMouseDown={handleMouseDown}
-            title="Drag to resize"
-          />
+            {/* Resize Handle */}
+            <div
+              className={`h-1 bg-border hover:bg-primary cursor-row-resize transition-colors ${isResizing ? 'bg-primary' : ''}`}
+              onMouseDown={handleMouseDown}
+              title="Drag to resize"
+            />
 
-          {/* Results Panel */}
-          <div style={{ height: `${100 - editorHeight}%` }} className="overflow-hidden">
-            <ResultsPanel />
-          </div>
-        </main>
+            {/* Results Panel */}
+            <div style={{ height: `${100 - editorHeight}%` }} className="overflow-hidden">
+              <ResultsPanel />
+            </div>
+          </main>
+
+          {learnModeEnabled && (
+            <aside className="w-[390px] border-l border-border bg-card">
+              <LearnModePanel />
+            </aside>
+          )}
+        </div>
       </div>
-
-      {/* Connection Manager Dialog */}
-      <ConnectionManager open={showConnectionManager} onOpenChange={setShowConnectionManager} />
 
       {/* Import Wizard */}
       <ImportWizard />

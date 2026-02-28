@@ -224,9 +224,9 @@ function createAdapter(db: Database.Database, dbPath: string): DatabaseAdapter {
       const command = getCommandType(trimmedSql);
 
       try {
-        // SELECT queries with prepared statement caching
-        if (command === 'SELECT' || command === 'PRAGMA' || command === 'EXPLAIN') {
-          const stmt = getPreparedStatement(db, dbPath, trimmedSql);
+        const stmt = getPreparedStatement(db, dbPath, trimmedSql);
+
+        if (stmt.reader) {
           const rows = params ? stmt.all(...params) : stmt.all();
 
           return {
@@ -238,28 +238,13 @@ function createAdapter(db: Database.Database, dbPath: string): DatabaseAdapter {
           };
         }
 
-        // DML queries (INSERT, UPDATE, DELETE) with caching
-        if (command === 'INSERT' || command === 'UPDATE' || command === 'DELETE') {
-          const stmt = getPreparedStatement(db, dbPath, trimmedSql);
-          const info = params ? stmt.run(...params) : stmt.run();
-
-          return {
-            rows: [],
-            rowCount: info.changes,
-            changes: info.changes,
-            lastInsertRowid: Number(info.lastInsertRowid),
-            command,
-          };
-        }
-
-        // DDL queries (CREATE, ALTER, DROP, etc.) - don't cache these
-        db.exec(trimmedSql);
+        const info = params ? stmt.run(...params) : stmt.run();
 
         return {
           rows: [],
-          rowCount: 0,
-          changes: 0,
-          lastInsertRowid: 0,
+          rowCount: info.changes,
+          changes: info.changes,
+          lastInsertRowid: Number(info.lastInsertRowid),
           command,
         };
       } catch (error) {
@@ -315,6 +300,7 @@ function getCommandType(sql: string): string {
   const normalized = sql.trim().toUpperCase();
 
   if (normalized.startsWith('SELECT')) return 'SELECT';
+  if (normalized.startsWith('WITH')) return 'WITH';
   if (normalized.startsWith('INSERT')) return 'INSERT';
   if (normalized.startsWith('UPDATE')) return 'UPDATE';
   if (normalized.startsWith('DELETE')) return 'DELETE';

@@ -9,6 +9,7 @@ import { initConfigDatabase, closeConfigDatabase } from './config/database';
 import logger from './utils/logger';
 import { requestLogger } from './middleware/requestLogger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { apiAuthMiddleware } from './middleware/apiAuth';
 import { closeAllDatabases } from './services/connections';
 
 // Import routes
@@ -20,8 +21,24 @@ import explainRouter from './routes/explain';
 import autocompleteRouter from './routes/autocomplete';
 import savedQueriesRouter from './routes/savedQueries';
 import backupRouter from './routes/backup';
+import learnRouter from './routes/learn';
 
 let server: ReturnType<typeof express.prototype.listen> | null = null;
+
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    const isLoopbackHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return isHttp && isLoopbackHost;
+  } catch {
+    return false;
+  }
+}
 
 function enforceDevRuntimeGuard(): void {
   if (process.env.NODE_ENV !== 'development') {
@@ -69,12 +86,38 @@ function enforceDevRuntimeGuard(): void {
 
 export function createApp(): Application {
   const app = express();
+  const isProduction = appConfig.nodeEnv === 'production';
 
   // Security middleware
-  app.use(helmet({
-    contentSecurityPolicy: false,
+  app.use(
+    helmet({
+      contentSecurityPolicy: isProduction
+        ? {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'"],
+              styleSrc: ["'self'", "'unsafe-inline'"],
+              imgSrc: ["'self'", 'data:', 'blob:'],
+              fontSrc: ["'self'", 'data:'],
+              connectSrc: ["'self'"],
+              objectSrc: ["'none'"],
+              baseUri: ["'self'"],
+              frameAncestors: ["'none'"],
+              formAction: ["'self'"],
+            },
+          }
+        : false,
+    })
+  );
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('CORS origin not allowed'));
+    },
   }));
-  app.use(cors());
 
   // Response compression for faster data transfer
   app.use(compression({
@@ -110,6 +153,9 @@ export function createApp(): Application {
   // Logging
   app.use(requestLogger);
 
+  // API authentication (enabled when API_AUTH_TOKEN is provided by Electron runtime)
+  app.use('/api/', apiAuthMiddleware);
+
   // Health check
   app.get('/health', (_req, res) => {
     res.json({
@@ -128,6 +174,7 @@ export function createApp(): Application {
   app.use('/api/autocomplete', autocompleteRouter);
   app.use('/api/saved-queries', savedQueriesRouter);
   app.use('/api/backup', backupRouter);
+  app.use('/api/learn', learnRouter);
 
   // Serve static files in production (Electron app)
   if (appConfig.nodeEnv === 'production') {

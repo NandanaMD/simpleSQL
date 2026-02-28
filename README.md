@@ -193,4 +193,34 @@ Schema visualization
 
 📄 License
 
-MIT License (or your chosen license)
+This project is licensed under the MIT License.
+See the [LICENSE](./LICENSE) file for details.
+
+🤝 Open Source Community Files
+
+This repository includes:
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- [SECURITY.md](./SECURITY.md)
+
+🛡️ Open-Source Release Checklist (Before Publishing)
+
+Before making the repository public, verify:
+
+- No real credentials or local-only connection details are committed
+- No personal/user data is present in committed `data/`, `logs/`, or generated files
+- Build artifacts in `release/`, `dist-installer/`, and `build/` are intentionally included or removed
+- Local config files are reviewed:
+	- `electron/config/connections.json`
+	- `server/config/connections.json`
+- Temporary test or debug files are reviewed and cleaned if not needed
+
+Recommended quick checks:
+
+```bash
+git grep -n -E "(api[_-]?key|token|password|secret|PRIVATE KEY|connectionString)"
+git status
+```
+
+If any sensitive value exists, rotate credentials and remove them from history before public release.

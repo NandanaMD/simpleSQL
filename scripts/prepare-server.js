@@ -18,6 +18,12 @@ const dependencies = [
   ...Object.keys(serverPackage.dependencies || {}),
 ];
 
+const runtimeDependencies = Object.fromEntries(
+  Object.entries(serverPackage.dependencies || {}).filter(
+    ([dep]) => !dep.startsWith('@sql-ide/')
+  )
+);
+
 console.log(`Copying ${dependencies.length} dependencies to server/node_modules...`);
 
 // Create server/node_modules if it doesn't exist
@@ -53,10 +59,28 @@ for (const dep of dependencies) {
 // Also need to copy dependencies of dependencies (sub-dependencies)
 // Use npm ls to get the full dependency tree and copy all needed modules
 console.log('Installing all nested dependencies...');
-execSync('npm install --prefix server --omit=dev --legacy-peer-deps', {
-  cwd: rootPath,
-  stdio: 'inherit'
-});
+const serverPackageJsonPath = path.join(serverPath, 'package.json');
+const originalServerPackageJson = fs.readFileSync(serverPackageJsonPath, 'utf8');
+
+try {
+  const sanitizedPackage = {
+    ...serverPackage,
+    dependencies: runtimeDependencies,
+  };
+
+  fs.writeFileSync(
+    serverPackageJsonPath,
+    JSON.stringify(sanitizedPackage, null, 2) + '\n',
+    'utf8'
+  );
+
+  execSync('npm install --prefix server --omit=dev --legacy-peer-deps', {
+    cwd: rootPath,
+    stdio: 'inherit'
+  });
+} finally {
+  fs.writeFileSync(serverPackageJsonPath, originalServerPackageJson, 'utf8');
+}
 
 // Rebuild native modules for Electron since server runs via fork with Electron's Node.js
 console.log('Rebuilding native modules for Electron...');

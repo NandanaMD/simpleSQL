@@ -12,6 +12,8 @@ export function getDatabases(connectionId: string): Database[] {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
 
+  connectionService.ensureConnectionAccess(connection);
+
   // In SQLite, each database is a file in the data directory
   // List all database files for this connection
   const dataDir = path.join(process.cwd(), 'data');
@@ -70,6 +72,8 @@ export function getSchemas(connectionId: string, database: string): Schema[] {
   if (!connection) {
     throw new ApiError(`Connection with id "${connectionId}" not found`, 404);
   }
+
+  connectionService.ensureConnectionAccess(connection);
 
   // SQLite doesn't have separate schemas like PostgreSQL
   // Return a single 'main' schema

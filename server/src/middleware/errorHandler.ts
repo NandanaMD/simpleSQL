@@ -30,13 +30,15 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  const rawMessage = err.message || 'Internal Server Error';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const message = isProduction && statusCode >= 500 ? 'Internal Server Error' : rawMessage;
 
   logger.error('Request error', {
     path: req.path,
     method: req.method,
     statusCode,
-    message,
+    message: rawMessage,
     code: err.code,
     detail: err.detail,
     stack: err.stack,
@@ -46,7 +48,7 @@ export function errorHandler(
     success: false,
     error: message,
     code: err.code,
-    detail: err.detail,
+    detail: isProduction && statusCode >= 500 ? undefined : err.detail,
     hint: err.hint,
   });
 }

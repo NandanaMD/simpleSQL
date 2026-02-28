@@ -28,6 +28,7 @@ export function SQLEditor() {
     setTabError,
     setTabDecorations,
     setTabMode,
+    setTabConnection,
     setTabTranslatedSql,
     clearTabResult,
     setQueryError,
@@ -181,7 +182,15 @@ export function SQLEditor() {
       return;
     }
 
-    const connectionId = activeTab.connectionId || selectedConnectionId;
+    const hasTabConnection = Boolean(activeTab.connectionId);
+    const tabConnectionExists = hasTabConnection
+      ? connections.some((connection) => connection.id === activeTab.connectionId)
+      : false;
+
+    const connectionId = tabConnectionExists
+      ? activeTab.connectionId
+      : selectedConnectionId;
+
     if (!connectionId) {
       toast.error('Please select a connection first');
       return;
@@ -192,10 +201,8 @@ export function SQLEditor() {
       return;
     }
 
-    const connection = connections.find((c) => c.id === connectionId);
-    if (!connection) {
-      toast.error('Connection not found');
-      return;
+    if (activeTab.connectionId !== connectionId) {
+      setTabConnection(activeTab.id, connectionId, selectedDatabase);
     }
 
     // Clear previous tab result state before starting a new execution attempt
@@ -379,7 +386,7 @@ export function SQLEditor() {
     } finally {
       setIsExecuting(false);
     }
-  }, [activeTab, selectedConnectionId, selectedDatabase, connections, querySettings, currentMode, updateTabContent, setTabResult, setTabError, setTabDecorations, setTabTranslatedSql, clearTabResult, setQueryError, setIsExecuting, addToHistory]);
+  }, [activeTab, selectedConnectionId, selectedDatabase, connections, querySettings, currentMode, updateTabContent, setTabConnection, setTabResult, setTabError, setTabDecorations, setTabTranslatedSql, clearTabResult, setQueryError, setIsExecuting, addToHistory]);
 
   // Keep the refs updated with the latest handlers
   useEffect(() => {
@@ -452,8 +459,8 @@ export function SQLEditor() {
           <button
             className={`px-2.5 py-0.5 text-xs transition-colors ${
               currentMode === 'sql'
-                ? 'bg-[#0078d4] text-white font-semibold'
-                : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
+                ? 'bg-accent text-accent-foreground font-medium'
+                : 'bg-transparent text-muted-foreground hover:bg-accent font-normal'
             }`}
             onClick={() => handleModeToggle('sql')}
             title="SQL Mode"
@@ -463,8 +470,8 @@ export function SQLEditor() {
           <button
             className={`px-2.5 py-0.5 text-xs transition-colors ${
               currentMode === 'simple'
-                ? 'bg-[#0078d4] text-white font-semibold'
-                : 'bg-transparent text-gray-600 hover:bg-accent font-normal'
+                ? 'bg-accent text-accent-foreground font-medium'
+                : 'bg-transparent text-muted-foreground hover:bg-accent font-normal'
             }`}
             onClick={() => handleModeToggle('simple')}
             title="SimpleSyntax Mode (Ctrl+Shift+M)"
@@ -483,7 +490,7 @@ export function SQLEditor() {
         </Button>
 
         {/* Mode Label */}
-        <span className="text-xs font-mono text-gray-500 ml-2">
+        <span className="text-xs font-mono text-muted-foreground ml-2">
           Mode: {currentMode === 'sql' ? 'SQL' : 'SimpleSyntax'}
         </span>
 
@@ -555,15 +562,15 @@ export function SQLEditor() {
 
         {/* SQL Preview Status Bar - Only in SimpleSyntax mode with translated SQL */}
         {currentMode === 'simple' && activeTab?.translatedSql && (
-          <div className="h-8 border-t border-border bg-[#f5f5f5] px-3 flex items-center justify-between text-xs font-mono">
+          <div className="h-8 border-t border-border bg-muted/60 px-3 flex items-center justify-between text-xs font-mono">
             <div className="flex items-center gap-2 flex-1 overflow-hidden">
-              <span className="text-gray-500">Translated SQL:</span>
-              <span className="text-black truncate" title={activeTab.translatedSql}>
+              <span className="text-muted-foreground">Translated SQL:</span>
+              <span className="text-foreground truncate" title={activeTab.translatedSql}>
                 {activeTab.translatedSql}
               </span>
             </div>
             <button
-              className="ml-2 px-2 py-1 text-gray-600 hover:text-black hover:bg-gray-200 rounded"
+              className="ml-2 px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded"
               onClick={() => {
                 navigator.clipboard.writeText(activeTab.translatedSql || '');
                 toast.success('SQL copied to clipboard');

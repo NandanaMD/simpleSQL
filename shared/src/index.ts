@@ -6,6 +6,7 @@ export interface Connection {
   port: number;
   username: string;
   password: string;
+  requiresAuthentication?: boolean;
   defaultDatabase: string;
   createdAt: string;
   updatedAt: string;
@@ -198,6 +199,128 @@ export interface ExplainResult {
   executionTime?: number;
   totalCost: number;
   queryText: string;
+}
+
+// Learn Mode Types
+export interface LearnHistoryItem {
+  sql: string;
+  success: boolean;
+  executionTime?: number;
+  executedAt?: string;
+}
+
+export interface AdaptiveCoachRequest {
+  sql?: string;
+  history?: LearnHistoryItem[];
+}
+
+export interface AdaptiveFocusArea {
+  topic: string;
+  score: number;
+  reason: string;
+  recommendedAction: string;
+}
+
+export interface AdaptiveCoachResponse {
+  readinessLevel: 'beginner' | 'intermediate' | 'advanced';
+  focusAreas: AdaptiveFocusArea[];
+  nextChallenges: string[];
+  encouragement: string;
+}
+
+export interface SocraticHintRequest {
+  question?: string;
+  sql?: string;
+  level?: 1 | 2 | 3;
+}
+
+export interface SocraticHintResponse {
+  hints: string[];
+  guidingQuestions: string[];
+  revealedPattern?: string;
+}
+
+export interface ExecutionVisualizerRequest {
+  sql: string;
+}
+
+export interface ExecutionVisualizerStep {
+  stage: string;
+  description: string;
+  snippet?: string;
+}
+
+export interface ExecutionVisualizerResponse {
+  steps: ExecutionVisualizerStep[];
+  clauseOrder: string[];
+  estimatedComplexity: 'low' | 'medium' | 'high';
+}
+
+export interface MisconceptionDetectorRequest {
+  sql: string;
+}
+
+export interface MisconceptionFinding {
+  category: string;
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  fix: string;
+}
+
+export interface MisconceptionDetectorResponse {
+  findings: MisconceptionFinding[];
+  summary: string;
+}
+
+export interface AutoLabGeneratorRequest {
+  connectionId: string;
+  database: string;
+  tableLimit?: number;
+}
+
+export interface LabExercise {
+  title: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  objective: string;
+  starterSql: string;
+  expectedConcepts: string[];
+}
+
+export interface AutoLabGeneratorResponse {
+  datasetSummary: string;
+  exercises: LabExercise[];
+}
+
+export interface FixQueryDrillsRequest {
+  count?: number;
+  primaryTable?: string;
+}
+
+export interface FixQueryDrill {
+  title: string;
+  focus: string;
+  brokenSql: string;
+  studentTask: string;
+  solutionSql: string;
+  explanation: string;
+}
+
+export interface FixQueryDrillsResponse {
+  drills: FixQueryDrill[];
+  summary: string;
+}
+
+export interface NaturalLanguageToSqlRequest {
+  prompt: string;
+  connectionId?: string;
+  database?: string;
+}
+
+export interface NaturalLanguageToSqlResponse {
+  sql: string;
+  critique: string[];
+  assumptions: string[];
+  saferAlternative?: string;
 }
 
 // API Response Types

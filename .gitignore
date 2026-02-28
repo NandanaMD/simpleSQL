@@ -45,8 +45,11 @@ Thumbs.db
 # Config (may contain sensitive connection strings)
 config/connections.json
 config/connections.db
+config/connections.key
 connections.json
 connections.db
+server/config/connections.key
+electron/config/connections.key
 
 # Runtime data
 data/
@@ -85,3 +88,4 @@ win-unpacked/
 mac/
 linux-unpacked/
 latest.yml
+assets/
