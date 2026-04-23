@@ -12,7 +12,7 @@ import {
   SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Download, Search, ChevronDown } from 'lucide-react';
+import { Download, Search, ChevronDown, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -355,9 +355,9 @@ export function ResultsPanel() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {hasResult ? (
-          <div className="w-[900px] max-w-[95%] h-[400px] ml-5 my-5 border border-border overflow-hidden rounded-lg">
+          <div className="flex-1 w-full h-full overflow-hidden">
             <ResultGrid 
               rows={activeTab.resultRows!}
               columns={activeTab.resultColumns!}
@@ -366,12 +366,14 @@ export function ResultsPanel() {
             />
           </div>
         ) : (
-          <OutputLog 
-            activeTab={activeTab}
-            queryError={queryError} 
-            isExecuting={isExecuting} 
-            formatTime={formatTime}
-          />
+          <div className="flex-1 overflow-auto">
+            <OutputLog 
+              activeTab={activeTab}
+              queryError={queryError} 
+              isExecuting={isExecuting} 
+              formatTime={formatTime}
+            />
+          </div>
         )}
       </div>
     </div>
@@ -558,38 +560,107 @@ function ResultGrid({ rows, columns, globalFilter, formatSettings }: { rows: any
   );
 }
 
+function parseError(error: string) {
+  if (!error) return { title: 'Unknown Error', details: '' };
+  
+  // Example SQLite or Postgres: "syntax error at or near 'foo'"
+  const syntaxMatch = error.match(/(syntax error at or near) (['"].*?['"])/i) || 
+                      error.match(/(near) (['"].*?['"]): (syntax error)/i);
+  
+  if (syntaxMatch) {
+    return {
+      title: 'Syntax Error',
+      details: error,
+      highlight: syntaxMatch[2]
+    };
+  }
+  
+  // Table not found
+  const tableMatch = error.match(/no such table: (.*)/i) || 
+                     error.match(/relation (['"].*?['"]) does not exist/i) ||
+                     error.match(/Table (['"].*?['"]) doesn't exist/i);
+                     
+  if (tableMatch) {
+    return {
+      title: 'Missing Table',
+      details: error,
+      highlight: tableMatch[1]
+    };
+  }
+  
+  // Column not found
+  const columnMatch = error.match(/no such column: (.*)/i) || 
+                      error.match(/column (['"].*?['"]) does not exist/i) ||
+                      error.match(/Unknown column (['"].*?['"]) in 'field list'/i);
+                      
+  if (columnMatch) {
+    return {
+      title: 'Missing Column',
+      details: error,
+      highlight: columnMatch[1]
+    };
+  }
+
+  return { title: 'Query Error', details: error };
+}
+
 // Output Log Component
 function OutputLog({ activeTab, queryError, isExecuting, formatTime }: any) {
+  const parsedError = queryError ? parseError(queryError) : null;
+
   return (
-    <div className="p-3 font-mono text-xs space-y-0.5 text-foreground/90">
+    <div className="p-4 font-mono text-xs space-y-4 text-foreground/90 max-w-4xl mx-auto mt-2">
       {isExecuting && (
-        <div>
-          <span className="text-muted-foreground/60">[{formatTime(new Date())}]</span> Executing query...
+        <div className="flex items-center gap-2 text-muted-foreground p-2">
+          <div className="animate-spin h-3 w-3 border-2 border-primary border-t-transparent rounded-full" />
+          <span>[{formatTime(new Date())}] Executing query...</span>
         </div>
       )}
       
-      {queryError && (
-        <>
-          <div className="text-destructive">
-            <span className="text-muted-foreground/60">[{formatTime(new Date())}]</span> Error: {queryError}
-          </div>
-        </>
-      )}
-
-      {activeTab?.executionTimestamp && activeTab.resultRowCount !== undefined && (
-        <div className="mb-1">
-          <div>
-            <span className="text-muted-foreground/60">[{formatTime(activeTab.executionTimestamp)}]</span> ✔ Query executed successfully.
-          </div>
-          <div>
-            <span className="text-muted-foreground/60">[{formatTime(activeTab.executionTimestamp)}]</span> {activeTab.resultRowCount} row{activeTab.resultRowCount !== 1 ? 's' : ''} {activeTab.resultCommand === 'SELECT' ? 'returned' : 'affected'} in {activeTab.executionTime}ms.
+      {queryError && parsedError && (
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 font-sans flex items-start gap-3 shadow-sm">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+          <div className="flex-1 space-y-1">
+            <h4 className="font-semibold text-destructive text-sm">
+              {parsedError.title}
+            </h4>
+            <div className="text-sm text-foreground/80 leading-relaxed mt-1">
+              {parsedError.highlight ? parsedError.details.split(parsedError.highlight).map((part, i, arr) => (
+                <React.Fragment key={i}>
+                  {part}
+                  {i < arr.length - 1 && (
+                    <span className="bg-destructive/20 text-destructive font-mono px-1.5 py-0.5 rounded-md font-bold mx-1">
+                      {parsedError.highlight}
+                    </span>
+                  )}
+                </React.Fragment>
+              )) : (
+                <div className="text-xs font-mono bg-background/50 p-2.5 rounded border border-border/50 mt-2 text-muted-foreground whitespace-pre-wrap">
+                  {parsedError.details}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {!isExecuting && !queryError && !activeTab?.resultRows && (
-        <div className="text-muted-foreground">
-          <span className="text-muted-foreground/60">[{formatTime(new Date())}]</span> Ready.
+      {activeTab?.executionTimestamp && activeTab.resultRowCount !== undefined && !queryError && (
+        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 font-sans">
+          <div className="text-green-600 dark:text-green-400 font-medium text-sm flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            Query executed successfully
+          </div>
+          <div className="text-muted-foreground text-xs mt-1.5 ml-6">
+            [{formatTime(activeTab.executionTimestamp)}] {activeTab.resultRowCount} row{activeTab.resultRowCount !== 1 ? 's' : ''} {activeTab.resultCommand === 'SELECT' ? 'returned' : 'affected'} in {activeTab.executionTime}ms.
+          </div>
+        </div>
+      )}
+
+      {!isExecuting && !queryError && !activeTab?.resultRows && activeTab?.resultRowCount === undefined && (
+        <div className="text-muted-foreground p-2">
+          <span>[{formatTime(new Date())}] Ready.</span>
         </div>
       )}
     </div>

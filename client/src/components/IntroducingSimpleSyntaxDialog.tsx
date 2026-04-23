@@ -153,6 +153,18 @@ export function IntroducingSimpleSyntaxDialog({
                 <span className="font-mono bg-white px-2 py-1 rounded border">remove</span>
                 <span className="text-gray-600 ml-2">DELETE data</span>
               </div>
+              <div>
+                <span className="font-mono bg-white px-2 py-1 rounded border">join</span>
+                <span className="text-gray-600 ml-2">JOIN queries</span>
+              </div>
+              <div>
+                <span className="font-mono bg-white px-2 py-1 rounded border">distinct / union</span>
+                <span className="text-gray-600 ml-2">Advanced read queries</span>
+              </div>
+              <div>
+                <span className="font-mono bg-white px-2 py-1 rounded border">having / subqueries</span>
+                <span className="text-gray-600 ml-2">Grouped and filtered analysis</span>
+              </div>
             </div>
           </div>
 

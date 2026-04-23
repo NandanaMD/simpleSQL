@@ -20,6 +20,8 @@ export function SimpleSyntaxHelpDialog({ open, onOpenChange }: SimpleSyntaxHelpD
         <div className="flex gap-2 border-b border-border pb-2 mb-4">
           {[
             { id: 'select', label: 'SELECT' },
+            { id: 'join', label: 'JOIN' },
+            { id: 'advanced', label: 'ADVANCED' },
             { id: 'aggregates', label: 'AGGREGATES' },
             { id: 'group', label: 'GROUP BY' },
             { id: 'insert', label: 'INSERT' },
@@ -88,6 +90,98 @@ export function SimpleSyntaxHelpDialog({ open, onOpenChange }: SimpleSyntaxHelpD
                 </pre>
                 <p className="text-xs text-gray-600">
                   → SELECT name, email FROM users WHERE age &gt; 30 ORDER BY name ASC LIMIT 50
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'join' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">JOIN Operations</h3>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Basic inner join:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">join orders customers on customer_id = id</pre>
+                <p className="text-xs text-gray-600">
+                  → SELECT * FROM orders INNER JOIN customers ON orders.customer_id = customers.id
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Explicit join types:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  join left orders customers on customer_id=id{`\n`}
+                  join right orders customers on customer_id=id
+                </pre>
+                <p className="text-xs text-gray-600">
+                  Supported types: inner (default), left, right
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">With WHERE / ORDER / LIMIT:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  join orders customers on customer_id=id where customers.status = 'active' order by customers.name asc limit 10
+                </pre>
+                <p className="text-xs text-gray-600">
+                  Tip: Use table-qualified columns (for example, customers.status) to avoid ambiguity.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'advanced' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Advanced SimpleSyntax</h3>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">DISTINCT and aliases:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  show distinct users country{`\n`}
+                  show users name as full_name email as primary_email
+                </pre>
+                <p className="text-xs text-gray-600">
+                  → SELECT DISTINCT country FROM users<br />
+                  → SELECT name AS full_name, email AS primary_email FROM users
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Functions and precedence in WHERE:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  show users where upper(name) = 'JOHN'{`\n`}
+                  show users where (status = 'active' or status = 'pending') and age &gt;= 18
+                </pre>
+                <p className="text-xs text-gray-600">
+                  Supports: upper, lower, trim, length, substr, coalesce, ifnull, abs, round,
+                  date/time/datetime/strftime, concat
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Subqueries (IN / EXISTS):</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  show users where id in (show orders customer_id where amount &gt; 1000){`\n`}
+                  show users where exists (show orders id where orders.customer_id = users.id)
+                </pre>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">UNION and UNION ALL:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  show users email union show admins email{`\n`}
+                  show users email union all show leads email
+                </pre>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Multi-statement batch:</h4>
+                <pre className="bg-gray-100 p-2 rounded text-sm">
+                  show users limit 5;{`\n`}
+                  show products limit 5;
+                </pre>
+                <p className="text-xs text-gray-600">
+                  Statements execute sequentially; result panel shows the last statement result.
                 </p>
               </div>
             </div>
@@ -288,12 +382,10 @@ export function SimpleSyntaxHelpDialog({ open, onOpenChange }: SimpleSyntaxHelpD
         <div className="mt-6 pt-4 border-t border-border">
           <h3 className="text-lg font-semibold mb-2">Not Supported (Use SQL Mode)</h3>
           <ul className="text-xs text-gray-600 space-y-1 ml-4 list-disc">
-            <li>Subqueries, JOINs, DISTINCT, UNION</li>
-            <li>Aliases (AS keyword)</li>
-            <li>Functions in WHERE clause (e.g., UPPER, LOWER)</li>
-            <li>Parentheses for operator precedence in WHERE</li>
-            <li>Multi-statement batches</li>
-            <li>HAVING clause</li>
+            <li>DDL operations (CREATE TABLE, ALTER TABLE, DROP TABLE)</li>
+            <li>Window functions and CTEs (WITH ...)</li>
+            <li>Correlated subqueries beyond IN/EXISTS beginner patterns</li>
+            <li>Vendor-specific SQL dialect features</li>
           </ul>
         </div>
 

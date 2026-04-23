@@ -429,39 +429,187 @@ function inferTableFromPrompt(prompt: string): string {
   return 'records';
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+interface SchemaContext {
+  tableNames: string[];
+  tableStructures: Record<string, TableStructure>;
+}
+
+function loadSchemaContext(connectionId?: string, database?: string): SchemaContext {
+  if (!connectionId || !database) {
+    return { tableNames: [], tableStructures: {} };
+  }
+
+  try {
+    const tables = metadataService.getTables(connectionId, database, 'main');
+    const tableNames = tables.map((table) => table.name);
+    const tableStructures: Record<string, TableStructure> = {};
+
+    for (const tableName of tableNames.slice(0, 12)) {
+      try {
+        tableStructures[tableName] = metadataService.getTableStructure(
+          connectionId,
+          database,
+          'main',
+          tableName
+        );
+      } catch {
+        // Skip table if structure lookup fails; keep NL flow resilient.
+      }
+    }
+
+    return { tableNames, tableStructures };
+  } catch {
+    return { tableNames: [], tableStructures: {} };
+  }
+}
+
+function inferTableFromPromptWithSchema(prompt: string, schema: SchemaContext): string {
+  const explicitFrom = prompt.match(/\bfrom\s+([a-zA-Z_][\w]*)/i)?.[1];
+  if (explicitFrom) {
+    return explicitFrom;
+  }
+
+  const lowerPrompt = prompt.toLowerCase();
+  const directMatch = schema.tableNames.find((tableName) =>
+    new RegExp(`\\b${escapeRegExp(tableName.toLowerCase())}\\b`, 'i').test(lowerPrompt)
+  );
+  if (directMatch) {
+    return directMatch;
+  }
+
+  return inferTableFromPrompt(prompt);
+}
+
+function pickPreferredColumn(
+  tableStructure: TableStructure | undefined,
+  patterns: RegExp[],
+  fallbackPatterns: RegExp[] = []
+): string | null {
+  if (!tableStructure || tableStructure.columns.length === 0) {
+    return null;
+  }
+
+  const names = tableStructure.columns.map((column) => column.name);
+  const exact = names.find((name) => patterns.some((pattern) => pattern.test(name)));
+  if (exact) {
+    return exact;
+  }
+
+  const fallback = names.find((name) => fallbackPatterns.some((pattern) => pattern.test(name)));
+  if (fallback) {
+    return fallback;
+  }
+
+  return null;
+}
+
+function pickNumericColumn(tableStructure: TableStructure | undefined): string | null {
+  if (!tableStructure || tableStructure.columns.length === 0) {
+    return null;
+  }
+
+  const preferred = pickPreferredColumn(tableStructure, [/amount/i, /total/i, /price/i, /revenue/i, /cost/i]);
+  if (preferred) {
+    return preferred;
+  }
+
+  const numeric = tableStructure.columns.find((column) => /INT|REAL|NUM|DEC|FLOAT|DOUBLE/i.test(column.dataType));
+  return numeric?.name || null;
+}
+
+function pickTimestampColumn(tableStructure: TableStructure | undefined): string | null {
+  return pickPreferredColumn(
+    tableStructure,
+    [/created_at/i, /updated_at/i, /timestamp/i, /date/i, /time/i],
+    [/created/i, /updated/i]
+  );
+}
+
+function pickStatusColumn(tableStructure: TableStructure | undefined): string | null {
+  return pickPreferredColumn(tableStructure, [/status/i, /state/i, /active/i]);
+}
+
+function quoteIdentifier(identifier: string): string {
+  return /^[_a-zA-Z][_a-zA-Z0-9]*$/.test(identifier) ? identifier : `"${identifier.replace(/"/g, '""')}"`;
+}
+
 export function naturalLanguageToSql(request: NaturalLanguageToSqlRequest): NaturalLanguageToSqlResponse {
   const prompt = request.prompt.trim();
   const lower = prompt.toLowerCase();
-  const table = inferTableFromPrompt(prompt);
+  const schemaContext = loadSchemaContext(request.connectionId, request.database);
+  const table = inferTableFromPromptWithSchema(prompt, schemaContext);
+  const tableStructure = schemaContext.tableStructures[table];
+  const safeTable = quoteIdentifier(table);
 
-  let sql = `SELECT *\nFROM ${table}\nLIMIT 50;`;
-  const assumptions: string[] = [`Assumed target table is ${table}.`];
+  const assumptions: string[] = [];
+  if (schemaContext.tableNames.includes(table)) {
+    assumptions.push(`Matched table '${table}' from current schema.`);
+  } else {
+    assumptions.push(`Inferred target table as '${table}' from prompt.`);
+  }
+
+  const numericColumn = pickNumericColumn(tableStructure);
+  const timestampColumn = pickTimestampColumn(tableStructure);
+  const statusColumn = pickStatusColumn(tableStructure);
+
+  let sql = `SELECT *\nFROM ${safeTable}\nLIMIT 50;`;
 
   if (lower.includes('count')) {
-    sql = `SELECT COUNT(*) AS total_count\nFROM ${table};`;
+    sql = `SELECT COUNT(*) AS total_count\nFROM ${safeTable};`;
   } else if (lower.includes('average') || lower.includes('avg')) {
-    sql = `SELECT AVG(amount) AS avg_amount\nFROM ${table};`;
-    assumptions.push('Assumed numeric metric column is amount.');
+    const metric = numericColumn || 'amount';
+    sql = `SELECT AVG(${quoteIdentifier(metric)}) AS avg_value\nFROM ${safeTable};`;
+    assumptions.push(
+      numericColumn
+        ? `Selected numeric metric column '${metric}' from schema.`
+        : "Used fallback metric column 'amount' because no numeric schema hint was available."
+    );
   } else if (lower.includes('top') || lower.includes('highest')) {
-    sql = `SELECT *\nFROM ${table}\nORDER BY amount DESC\nLIMIT 10;`;
-    assumptions.push('Assumed ranking column is amount.');
+    const rankColumn = numericColumn || 'amount';
+    sql = `SELECT *\nFROM ${safeTable}\nORDER BY ${quoteIdentifier(rankColumn)} DESC\nLIMIT 10;`;
+    assumptions.push(
+      numericColumn
+        ? `Selected ranking column '${rankColumn}' from schema.`
+        : "Used fallback ranking column 'amount'."
+    );
   } else if (lower.includes('latest') || lower.includes('recent')) {
-    sql = `SELECT *\nFROM ${table}\nORDER BY created_at DESC\nLIMIT 20;`;
-    assumptions.push('Assumed timestamp column is created_at.');
+    const timeColumn = timestampColumn || 'created_at';
+    sql = `SELECT *\nFROM ${safeTable}\nORDER BY ${quoteIdentifier(timeColumn)} DESC\nLIMIT 20;`;
+    assumptions.push(
+      timestampColumn
+        ? `Selected timestamp column '${timeColumn}' from schema.`
+        : "Used fallback timestamp column 'created_at'."
+    );
+
+    if (lower.includes('last month')) {
+      sql = `SELECT *\nFROM ${safeTable}\nWHERE ${quoteIdentifier(timeColumn)} >= date('now', '-1 month')\nORDER BY ${quoteIdentifier(timeColumn)} DESC\nLIMIT 100;`;
+      assumptions.push("Interpreted 'last month' as SQLite date('now', '-1 month') filter.");
+    }
   }
 
   if (lower.includes('where') && !/\bWHERE\b/.test(sql.toUpperCase())) {
-    sql = sql.replace(/;$/, '\nWHERE status = \'active\';');
-    assumptions.push('Applied status filter as a placeholder for your WHERE intent.');
+    const filterColumn = statusColumn || 'status';
+    sql = sql.replace(/;$/, `\nWHERE ${quoteIdentifier(filterColumn)} = 'active';`);
+    assumptions.push(
+      statusColumn
+        ? `Applied WHERE filter using schema column '${filterColumn}'.`
+        : "Applied fallback WHERE filter using column 'status'."
+    );
   }
 
   const critique = [
-    'Confirm the inferred table and column names before execution.',
-    'Replace placeholder columns (like amount/created_at/status) with schema-accurate names.',
+    'Confirm inferred intent and filters before executing against production data.',
+    schemaContext.tableNames.length > 0
+      ? 'Schema context was available and used to pick table/columns where possible.'
+      : 'No schema context was available; generated SQL may require table/column adjustments.',
     'Add an explicit ORDER BY when using LIMIT for deterministic outputs.',
   ];
 
-  const saferAlternative = `-- Validate shape first\nSELECT *\nFROM ${table}\nLIMIT 5;`;
+  const saferAlternative = `-- Validate shape first\nSELECT *\nFROM ${safeTable}\nLIMIT 5;`;
 
   return {
     sql,

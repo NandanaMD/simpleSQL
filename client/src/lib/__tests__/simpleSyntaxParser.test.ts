@@ -247,6 +247,56 @@ describe('SimpleSyntax Parser', () => {
     });
   });
 
+  describe('JOIN command', () => {
+    it('should translate basic join with explicit equals token', () => {
+      const result = translate('join orders customers on customer_id = id');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM orders INNER JOIN customers ON orders.customer_id = customers.id'
+      );
+    });
+
+    it('should translate join with inline equals token', () => {
+      const result = translate('join orders customers on customer_id=id');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM orders INNER JOIN customers ON orders.customer_id = customers.id'
+      );
+    });
+
+    it('should support LEFT join', () => {
+      const result = translate('join left orders customers on customer_id = id');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM orders LEFT JOIN customers ON orders.customer_id = customers.id'
+      );
+    });
+
+    it('should support RIGHT join with where/order/limit', () => {
+      const result = translate(
+        'join right orders customers on customer_id=id where customers.status = \'active\' order by customers.name asc limit 5'
+      );
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM orders RIGHT JOIN customers ON orders.customer_id = customers.id WHERE customers.status = \'active\' ORDER BY customers.name ASC LIMIT 5'
+      );
+    });
+
+    it('should preserve explicit table-qualified join condition', () => {
+      const result = translate('join orders customers on orders.customer_id = customers.id');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM orders INNER JOIN customers ON orders.customer_id = customers.id'
+      );
+    });
+
+    it('should reject join without on keyword', () => {
+      const result = translate('join orders customers customer_id = id');
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain("Expected 'on'");
+    });
+  });
+
   describe('WHERE clause operators', () => {
     it('should support = operator', () => {
       const result = translate('show users where status = \'active\'');
@@ -507,6 +557,79 @@ describe('SimpleSyntax Parser', () => {
       );
       expect(result.success).toBe(true);
       expect(result.sql).toContain('category = \'electronics\' AND price < 1000 OR featured = 1');
+    });
+
+    it('should allow qualified columns in WHERE and ORDER BY', () => {
+      const result = translate(
+        'join orders customers on customer_id=id where orders.total_amount > 100 order by customers.name asc'
+      );
+      expect(result.success).toBe(true);
+      expect(result.sql).toContain('WHERE orders.total_amount > 100');
+      expect(result.sql).toContain('ORDER BY customers.name ASC');
+    });
+  });
+
+  describe('Advanced features previously unsupported', () => {
+    it('should support DISTINCT in show command', () => {
+      const result = translate('show distinct users country');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT DISTINCT country FROM users');
+    });
+
+    it('should support AS aliases in show projection', () => {
+      const result = translate('show users name as full_name email as primary_email');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT name AS full_name, email AS primary_email FROM users');
+    });
+
+    it('should support functions in WHERE clause', () => {
+      const result = translate('show users where upper(name) = \'JOHN\'');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT * FROM users WHERE UPPER(name) = \'JOHN\'');
+    });
+
+    it('should support parenthesized WHERE precedence', () => {
+      const result = translate(
+        'show users where (status = \'active\' or status = \'pending\') and age >= 18'
+      );
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM users WHERE (status = \'active\' OR status = \'pending\') AND age >= 18'
+      );
+    });
+
+    it('should support GROUP HAVING', () => {
+      const result = translate('group orders by customer_id having count(*) > 1');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT customer_id, COUNT(*) as count FROM orders GROUP BY customer_id HAVING COUNT(*) > 1'
+      );
+    });
+
+    it('should support UNION with show queries', () => {
+      const result = translate('show users email union show admins email');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT email FROM users UNION SELECT email FROM admins');
+    });
+
+    it('should support UNION ALL with show queries', () => {
+      const result = translate('show users email union all show leads email');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT email FROM users UNION ALL SELECT email FROM leads');
+    });
+
+    it('should support subqueries in IN clause', () => {
+      const result = translate('show users where id in (show orders customer_id where amount > 1000)');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe(
+        'SELECT * FROM users WHERE id IN (SELECT customer_id FROM orders WHERE amount > 1000)'
+      );
+    });
+
+    it('should support multi-statement batches', () => {
+      const result = translate('show users limit 1; show products limit 1;');
+      expect(result.success).toBe(true);
+      expect(result.sql).toBe('SELECT * FROM users LIMIT 1; SELECT * FROM products LIMIT 1');
     });
   });
 });

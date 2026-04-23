@@ -4,12 +4,11 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useThemeStore } from '../stores/themeStore';
 import Editor, { OnMount } from '@monaco-editor/react';
-import { X, Plus, Code2, AlertTriangle, HelpCircle } from 'lucide-react';
+import { X, Plus, Code2, AlertTriangle, HelpCircle, Play } from 'lucide-react';
 import { Button } from './ui/button';
 import * as api from '../lib/api';
 import { toast } from 'sonner';
 import type { QueryRequest } from '@sql-ide/shared';
-import executeIcon from '../../../assets/icons/execute.svg';
 
 import { formatSQL, validateSQL } from '../lib/sqlFormatter';
 import { interpretError, clearHighlights } from '../lib/errorInterpreter';
@@ -481,7 +480,7 @@ export function SQLEditor() {
         </div>
 
         <Button size="sm" className="h-7 px-2.5 text-xs" onClick={handleExecute} disabled={isExecuting}>
-          <img src={executeIcon} alt="" aria-hidden="true" className="h-3.5 w-3.5 mr-1.5" />
+          <Play className="h-3.5 w-3.5 mr-1.5" />
           Execute
         </Button>
         <Button size="sm" className="h-7 px-2.5 text-xs" variant="outline" onClick={handleFormat} disabled={isExecuting || currentMode === 'simple'} title="Format SQL (Ctrl+Shift+F)">

@@ -72,29 +72,46 @@ SimpleSQL is organized as a monorepo with clear boundaries:
 - electron: Desktop process and secure preload bridge
 - shared: Shared types and contracts
 
-## SimpleSyntax v1 Commands
+## SimpleSyntax Commands
 
 ```text
 SELECT
 show products
 show products name price
+show distinct products category
+show products name as product_name price as unit_price
 show products where price > 100
+show products where upper(name) = 'PEN'
+show products where (price > 100 or category = 'Office') and stock > 0
 show products order by price desc
 show products limit 10
+show products id union show archived_products id
 
 AGGREGATES
 count products
 sum products price
 avg products price
+group orders by customer_id having count(*) > 1
+
+JOIN
+join orders customers on customer_id = id
+join left orders customers on customer_id = id
 
 INSERT
-add products name="Pen" price=10
+add products name='Pen' price=10
 
 UPDATE
 update products set price=20 where id=1
 
 DELETE
 remove products where id=5
+
+SUBQUERIES
+show users where id in (show orders customer_id where amount > 1000)
+
+BATCHES
+show users limit 5;
+show products limit 5;
 ```
 
 ## Getting Started
@@ -177,7 +194,6 @@ SimpleSQL is built around three principles:
 ## Roadmap
 
 - Optional AI-enhanced error explanation layer
-- JOIN support in SimpleSyntax v2
 - Query history improvements
 - Result grid performance optimization
 - Schema visualization

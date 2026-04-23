@@ -95,11 +95,12 @@ export function createApp(): Application {
         ? {
             directives: {
               defaultSrc: ["'self'"],
-              scriptSrc: ["'self'"],
-              styleSrc: ["'self'", "'unsafe-inline'"],
+              scriptSrc: ["'self'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://unpkg.com"],
+              styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://unpkg.com"],
               imgSrc: ["'self'", 'data:', 'blob:'],
-              fontSrc: ["'self'", 'data:'],
-              connectSrc: ["'self'"],
+              fontSrc: ["'self'", 'data:', "https://cdn.jsdelivr.net", "https://unpkg.com"],
+              connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://unpkg.com"],
+              workerSrc: ["'self'", "blob:"],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
               frameAncestors: ["'none'"],

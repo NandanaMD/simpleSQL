@@ -14,13 +14,8 @@ import { SavedQueriesDialog } from './components/SavedQueriesDialog';
 import { IntroducingSimpleSyntaxDialog } from './components/IntroducingSimpleSyntaxDialog';
 import { LearnModePanel } from './components/LearnModePanel';
 import { Toaster, toast } from 'sonner';
-import { Sun, Moon, Sparkles, GraduationCap } from 'lucide-react';
+import { Sun, Moon, Sparkles, GraduationCap, Bookmark, HelpCircle, Settings, Upload, Database } from 'lucide-react';
 import { Button } from './components/ui/button';
-import savedQueriesIcon from '../../assets/icons/saved_queries.svg';
-import helpIcon from '../../assets/icons/help.svg';
-import settingsIcon from '../../assets/icons/settings.svg';
-import importIcon from '../../assets/icons/import.svg';
-import connectionIcon from '../../assets/icons/connection.svg';
 import { useLearnStore } from './stores/learnStore';
 
 function App() {
@@ -81,6 +76,11 @@ function App() {
       }
 
       if (event.status === 'error' && event.message) {
+        // Ignore expected 404 errors for latest.yml when a release doesn't exist yet
+        if (event.message.includes('latest.yml') && event.message.includes('404')) {
+          return;
+        }
+
         toast.error('Update check failed', {
           description: event.message,
           duration: 4000,
@@ -175,23 +175,23 @@ function App() {
             Learn Mode {learnModeEnabled ? 'On' : 'Off'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowSavedQueries(true)} title="Saved Queries">
-            <img src={savedQueriesIcon} alt="" aria-hidden="true" className="h-4 w-4" />
+            <Bookmark className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} title="Help">
-            <img src={helpIcon} alt="" aria-hidden="true" className="h-4 w-4" />
+            <HelpCircle className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="ghost" onClick={toggleTheme} title="Toggle Theme">
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowSettings(true)} title="Settings">
-            <img src={settingsIcon} alt="" aria-hidden="true" className="h-4 w-4" />
+            <Settings className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={() => openWizard()}>
-            <img src={importIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
+            <Upload className="h-4 w-4 mr-2" />
             Import
           </Button>
           <Button size="sm" variant="outline" onClick={() => setShowConnectionHub(true)}>
-            <img src={connectionIcon} alt="" aria-hidden="true" className="h-4 w-4 mr-2" />
+            <Database className="h-4 w-4 mr-2" />
             Switch Connection
           </Button>
         </div>

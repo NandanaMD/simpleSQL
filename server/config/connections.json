@@ -6,10 +6,21 @@
       "host": "localhost",
       "port": 5432,
       "username": "nandan",
-      "password": "enc:v1:muG/F+zx0iyYmE27YqJ4IO1YacOQFujGxIjkbw4ECVXGwUXepA==",
+      "password": "enc:v1:yhQBu1/hwSvHg5Hj6ueIfKNSA3qGmVEzZhz2gNVuI4DHlAJ18g==",
       "defaultDatabase": "mydb",
       "createdAt": "2026-02-28T13:24:15.983Z",
       "updatedAt": "2026-02-28T13:24:15.983Z"
+    },
+    "3456b442-3155-4a6c-a151-8c89df152be0": {
+      "id": "3456b442-3155-4a6c-a151-8c89df152be0",
+      "name": "Connection L4XR",
+      "host": "localhost",
+      "port": 5432,
+      "username": "",
+      "password": "",
+      "defaultDatabase": "space",
+      "createdAt": "2026-03-25T13:19:29.710Z",
+      "updatedAt": "2026-03-25T13:19:29.710Z"
     }
   },
   "savedQueries": {}
