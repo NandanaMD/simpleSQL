@@ -155,7 +155,7 @@ async function startServer(): Promise<number> {
     serverProcess = fork(serverPath, [], {
       execPath: process.execPath, // Use Electron's Node.js, not system Node.js
       execArgv,
-      cwd: serverDir,
+      cwd: isDev ? serverDir : app.getPath('userData'),
       env: {
         ...process.env,
         NODE_ENV: isDev ? 'development' : 'production',
@@ -208,14 +208,14 @@ async function startServer(): Promise<number> {
       logToFile(`[Server] Exited with code ${code}`);
     });
 
-    // Timeout after 10 seconds
+    // Timeout after 30 seconds
     setTimeout(() => {
       if (serverPort === 3000) {
         const error = new Error('Server failed to start within timeout');
         logToFile(`[Server] Timeout: ${error.message}`);
         reject(error);
       }
-    }, 10000);
+    }, 30000);
   });
 }
 

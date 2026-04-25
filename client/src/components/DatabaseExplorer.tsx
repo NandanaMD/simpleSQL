@@ -5,7 +5,7 @@ import { useImportStore } from '../stores/importStore';
 import { useEditorStore } from '../stores/editorStore';
 import { BackupManager } from './BackupManager';
 import * as api from '../lib/api';
-import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Key, Lock, Unlock, Columns3 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Database, Table, Loader2, Check, FileUp, Code, Trash2, Edit2, Copy, RefreshCw, Eye, Key, Lock, Unlock, Columns3, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import selectedIcon from '../../../assets/icons/selected.svg';
 import databaseSelectedIcon from '../../../assets/icons/database_selected.svg';
@@ -33,6 +33,9 @@ export function DatabaseExplorer() {
     type: string 
   } | null>(null);
   const [backupManager, setBackupManager] = useState<{ open: boolean; connectionId: string; database: string } | null>(null);
+  const [showCreateDb, setShowCreateDb] = useState(false);
+  const [newDbName, setNewDbName] = useState('');
+  const [isCreatingDb, setIsCreatingDb] = useState(false);
 
   const loadDatabasesForConnection = async (connectionId: string) => {
     setNodeLoading(connectionId, true);
@@ -395,6 +398,49 @@ export function DatabaseExplorer() {
     }
   };
 
+  const handleCreateDatabase = async () => {
+    if (!selectedConnectionId) {
+      toast.error('No active connection');
+      return;
+    }
+
+    const trimmedName = newDbName.trim();
+    if (!trimmedName) {
+      toast.error('Database name cannot be empty');
+      return;
+    }
+
+    // Validate name: alphanumeric, underscores, hyphens only
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedName)) {
+      toast.error('Database name can only contain letters, numbers, underscores, and hyphens');
+      return;
+    }
+
+    setIsCreatingDb(true);
+    try {
+      await api.executeQuery({
+        connectionId: selectedConnectionId,
+        sql: `CREATE DATABASE "${trimmedName}";`,
+      });
+
+      toast.success(`Database "${trimmedName}" created successfully`);
+
+      // Refresh the database list in the explorer
+      await loadDatabasesForConnection(selectedConnectionId);
+
+      // Auto-select the newly created database
+      setActiveConnection(selectedConnectionId, trimmedName);
+
+      // Reset the form
+      setNewDbName('');
+      setShowCreateDb(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create database');
+    } finally {
+      setIsCreatingDb(false);
+    }
+  };
+
   const handleCopyColumnName = () => {
     if (!contextMenu || !contextMenu.column) return;
     
@@ -533,14 +579,69 @@ export function DatabaseExplorer() {
     <div className="p-2 relative flex flex-col h-full">
       <div className="flex items-center justify-between mb-2 px-2">
         <h2 className="text-xs font-semibold uppercase text-muted-foreground">Databases</h2>
-        <button
-          onClick={handleRefreshAll}
-          className="p-1 hover:bg-accent rounded-sm transition-colors"
-          title="Refresh all"
-        >
-          <RefreshCw className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          {selectedConnectionId && (
+            <button
+              onClick={() => { setShowCreateDb(!showCreateDb); setNewDbName(''); }}
+              className="p-1 hover:bg-accent rounded-sm transition-colors"
+              title="Create new database"
+            >
+              {showCreateDb ? (
+                <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+              ) : (
+                <Plus className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+              )}
+            </button>
+          )}
+          <button
+            onClick={handleRefreshAll}
+            className="p-1 hover:bg-accent rounded-sm transition-colors"
+            title="Refresh all"
+          >
+            <RefreshCw className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          </button>
+        </div>
       </div>
+
+      {/* Create Database Inline Form */}
+      {showCreateDb && selectedConnectionId && (
+        <div className="mb-2 px-2 py-2 bg-accent/50 rounded-md border border-border">
+          <p className="text-xs font-semibold mb-1.5 text-foreground">New Database</p>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={newDbName}
+              onChange={(e) => setNewDbName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleCreateDatabase();
+                } else if (e.key === 'Escape') {
+                  setShowCreateDb(false);
+                  setNewDbName('');
+                }
+              }}
+              placeholder="e.g. sales_db"
+              autoFocus
+              disabled={isCreatingDb}
+              className="flex-1 min-w-0 px-2 py-1 text-sm bg-background border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+            />
+            <button
+              onClick={() => void handleCreateDatabase()}
+              disabled={isCreatingDb || !newDbName.trim()}
+              className="px-2 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+            >
+              {isCreatingDb ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Plus className="h-3 w-3" />
+              )}
+              Create
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">Letters, numbers, underscores, hyphens only</p>
+        </div>
+      )}
       
       {/* Selected Database Indicator */}
       {selectedConnectionId && selectedDatabase && (
@@ -579,6 +680,17 @@ export function DatabaseExplorer() {
                 Select Database
               </button>
               <div className="h-px bg-border my-1" />
+              <button
+                className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
+                onClick={() => {
+                  setShowCreateDb(true);
+                  setNewDbName('');
+                  setContextMenu(null);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Create Database...
+              </button>
               <button
                 className="w-full px-3 py-2 text-sm text-left hover:bg-accent flex items-center gap-2 cursor-pointer"
                 onClick={() => {
